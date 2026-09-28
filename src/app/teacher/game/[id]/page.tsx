@@ -47,10 +47,6 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
       ? Math.max(0, Math.ceil((deadline - now) / 1000))
       : Math.max(0, Number(session?.timeLeft) || 0)
     : 0;
-  const timePct = timeLimit > 0 ? Math.max(0, Math.min(100, (timeLeft / timeLimit) * 100)) : 0;
-  const timeColor = timeLeft <= 0 ? 'bg-primary-500' : timeLeft <= 10 ? 'bg-warm-400' : 'bg-accent-400';
-  const mmss = (sec: number) =>
-    `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 
   const setTime = (timeAction: string, timeSeconds?: number) =>
     updateSession({ timeAction, ...(timeSeconds != null ? { timeSeconds } : {}) });
@@ -370,15 +366,11 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                   <p className="text-xs text-quest-text/60">⚡ เริ่มแล้ว</p>
                 </div>
                 <div className="text-center p-4 bg-gray-50 rounded-2xl">
-                  <p
-                    className={`text-2xl font-bold tabular-nums ${
-                      timeLimit && timeLeft <= 10 ? 'text-warm-500' : ''
-                    }`}
-                  >
-                    {timeLimit ? mmss(timeLeft) : '—'}
+                  <p className="text-2xl font-bold tabular-nums">
+                    {timeLimit ? `${timeLimit} วิ` : '—'}
                   </p>
                   <p className="text-xs text-quest-text/60">
-                    {timeLimit ? (timeRunning ? 'นับถอยหลัง' : 'หยุดเวลา') : 'ไม่จับเวลา'}
+                    {timeLimit ? (timeRunning ? '⏱️ เวลาต่อข้อ' : '⏸️ เวลาหยุด') : 'ไม่จับเวลา'}
                   </p>
                 </div>
               </div>
@@ -529,7 +521,7 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
               <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
                 <h2 className="text-lg font-bold">⏱️ จับเวลา</h2>
                 <span className="text-xs text-quest-text/60">
-                  เวลาต่อข้อของนักเรียน: {timeLimit ? `${timeLimit} วินาที` : 'ไม่จับเวลา'} • กด +/− เปลี่ยนได้ระหว่างเล่น
+                  งบเวลารายข้อของทุกคน — กด +/− เปลี่ยนได้ระหว่างเล่น
                 </span>
               </div>
 
@@ -555,15 +547,11 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                 <>
                   <div className="flex items-center gap-3 mb-4">
                     <div className="flex-1 text-center p-4 bg-gray-50 rounded-2xl">
-                      <p
-                        className={`text-5xl font-bold tabular-nums ${
-                          timeLeft <= 10 ? 'text-warm-500' : ''
-                        }`}
-                      >
-                        {mmss(timeLeft)}
-                      </p>
+                      <p className="text-5xl font-bold tabular-nums">{timeLimit} วิ</p>
                       <p className="text-xs text-quest-text/60 mt-1">
-                        {timeRunning ? '⏳ กำลังนับถอยหลัง' : '⏸️ หยุดอยู่'}
+                        {timeRunning
+                          ? '⏳ กำลังจับเวลา — นักเรียนแต่ละคนได้เวลาข้อละเท่านี้'
+                          : '⏸️ นาฬิกานักเรียนหยุดชั่วคราว'}
                       </p>
                     </div>
                     <div className="flex flex-col gap-2 shrink-0">
@@ -586,13 +574,6 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                         🔄 รีเซ็ต
                       </button>
                     </div>
-                  </div>
-
-                  <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden mb-4">
-                    <div
-                      className={`h-full rounded-full transition-[width] duration-300 ${timeColor}`}
-                      style={{ width: `${timePct}%` }}
-                    />
                   </div>
 
                   <div className="grid grid-cols-4 gap-2 mb-3">
@@ -756,6 +737,16 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                           </span>
                         </div>
                         <p className="text-xs text-quest-text/60 ml-8 mt-1">{progressLabel(p)}</p>
+                        {p.studentId && (
+                          <div className="ml-8 mt-2">
+                            <Link
+                              href={`/teacher/student/${p.studentId}?gameId=${gameId}`}
+                              className="inline-block text-xs font-medium text-purple-700 bg-lavender-100 hover:bg-lavender-200 px-3 py-1.5 rounded-full transition-colors"
+                            >
+                              📊 ดูผลวิเคราะห์
+                            </Link>
+                          </div>
+                        )}
                       </div>
                     ))}
                 </div>

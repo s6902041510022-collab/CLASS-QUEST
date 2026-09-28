@@ -132,7 +132,7 @@ function OverviewAnalytics({ data, tab, setTab }: any) {
             data.students.map((s: any) => (
               <Link
                 key={s.id}
-                href={`/student/me?studentId=${s.id}`}
+                href={`/teacher/student/${s.id}`}
                 className="card p-4 flex items-center gap-4 hover:shadow-card transition-shadow"
               >
                 <span className="text-2xl shrink-0">{s.avatar}</span>
@@ -215,7 +215,7 @@ function GameAnalytics({ data, tab, setTab }: any) {
             {data.students.map((s: any, i: number) => (
               <Link
                 key={s.id}
-                href={`/student/me?studentId=${s.id}&gameId=${data.game?.id}`}
+                href={`/teacher/student/${s.id}?gameId=${data.game?.id}`}
                 className="card p-4 flex items-center gap-3 hover:shadow-card transition-shadow"
               >
                 <span
