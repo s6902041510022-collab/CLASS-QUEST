@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
-import { createSession, getSession, updateSessionLive, getPlayers, rollUp } from '@/lib/db';
+import {
+  createSession,
+  getSession,
+  updateSessionLive,
+  getPlayers,
+  rollUp,
+  settleBossDefeat,
+} from '@/lib/db';
 
 export async function GET(request: Request) {
   try {
@@ -7,6 +14,8 @@ export async function GET(request: Request) {
     if (!gameId) {
       return NextResponse.json({ success: false, error: 'gameId is required' }, { status: 400 });
     }
+    // โอกาสสุดท้ายให้ "บอสที่ตายแล้ว" ปิดรอบเมื่อเลยช่วงลมจับ (ครู/นักเรียน poll มาเรื่อยๆ)
+    await settleBossDefeat(gameId);
     return NextResponse.json({ success: true, data: await getSession(gameId) });
   } catch {
     return NextResponse.json({ success: false, error: 'โหลดสถานะไม่สำเร็จ' }, { status: 500 });

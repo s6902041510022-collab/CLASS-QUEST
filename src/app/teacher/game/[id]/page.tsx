@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { MASCOT } from '@/lib/utils';
+import { MASCOT, BOSS_DAMAGE_PER_CORRECT } from '@/lib/utils';
 import { clearTeacherSession } from '@/lib/auth';
 
 export default function LiveGameControlPage({ params }: { params: { id: string } }) {
@@ -58,7 +58,23 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
   const status = session?.status || 'lobby';
   const missionIndex = session?.currentMissionIndex ?? 0;
   const questionIndex = session?.currentQuestionIndex ?? 0;
-  const mission = missions[missionIndex];
+
+  // ลำดับเล่น = ด่านควิซทั้งหมดก่อน แล้วด่านบอสต่อท้ายเสมอ (ตรงกับเซิร์ฟเวอร์)
+  const flowMissions = [...missions]
+    .sort((a: any, b: any) => a.order - b.order)
+    .sort((a: any, b: any) => (a.type === 'boss' ? 1 : 0) - (b.type === 'boss' ? 1 : 0));
+  const quizCount = flowMissions.filter((m: any) => m.type !== 'boss').length;
+  const bossMission = flowMissions.find((m: any) => m.type === 'boss');
+  const bossIndex = bossMission ? flowMissions.indexOf(bossMission) : -1;
+  const bossHpMax = Number(game?.bossHp) || 1000;
+  const bossHits = Array.isArray(session?.bossHits) ? session.bossHits.length : 0;
+  const bossHpLeft =
+    typeof session?.bossHpLeft === 'number'
+      ? session.bossHpLeft
+      : Math.max(0, bossHpMax - bossHits * BOSS_DAMAGE_PER_CORRECT);
+  const bossDefeated = bossHpLeft <= 0;
+
+  const mission = flowMissions[missionIndex];
   const question = mission?.questions?.[questionIndex];
 
   const loadStatic = useCallback(async () => {
@@ -167,19 +183,53 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
 
   // ปุ่มหลักตามสถานะ
   const goNext = () => {
-    if (missionIndex + 1 < missions.length) {
+    // อยู่ในด่านบอส → เลื่อนคำถามบอส
+    if (status === 'boss' && bossMission) {
+      const total = bossMission.questions?.length || 0;
+      if (questionIndex + 1 < total) {
+        updateSession({ currentQuestionIndex: questionIndex + 1 });
+      }
+      return;
+    }
+    // ยังมีด่านควิซเหลือ → ไปด่านถัดไป
+    if (missionIndex + 1 < quizCount) {
       updateSession({
         status: 'question',
         currentMissionIndex: missionIndex + 1,
         currentQuestionIndex: 0,
       });
+      return;
+    }
+    // จบด่านควิซทั้งหมด → เข้าด่านบอส (เปิดการโจมตีใหม่)
+    if (bossMission && bossIndex >= 0) {
+      updateSession({
+        status: 'boss',
+        currentMissionIndex: bossIndex,
+        currentQuestionIndex: 0,
+        bossHp: bossHpMax,
+        bossHits: [],
+      });
     } else {
-      // จบ mission → เข้า boss phase
-      updateSession({ status: 'boss', bossHp: game?.bossHp || 1000 });
+      updateSession({ status: 'boss', bossHp: bossHpMax });
     }
   };
 
   const goBack = () => {
+    // ย้อนกลับในด่านบอส
+    if (status === 'boss' && bossMission) {
+      if (questionIndex > 0) {
+        updateSession({ currentQuestionIndex: questionIndex - 1 });
+      } else if (quizCount > 0) {
+        // กลับไปข้อสุดท้ายของด่านควิซด่านสุดท้าย
+        const lastQuiz = flowMissions[quizCount - 1];
+        updateSession({
+          status: 'question',
+          currentMissionIndex: quizCount - 1,
+          currentQuestionIndex: Math.max(0, (lastQuiz?.questions?.length || 1) - 1),
+        });
+      }
+      return;
+    }
     if (questionIndex > 0) {
       updateSession({ currentQuestionIndex: questionIndex - 1 });
     } else if (missionIndex > 0) {
@@ -187,12 +237,15 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
     }
   };
 
+  // ใช้เฉพาะเกมที่ไม่มีด่านบอส (โหมดเก่า) — ครูกดโจมตีเองทีละ 100 HP
   const attackBoss = () => {
-    const max = game?.bossHp || 1000;
-    const current = session?.bossHp ?? max;
-    const damage = 100;
-    const next = Math.max(0, current - damage);
-    updateSession(next <= 0 ? { status: 'completed', bossHp: 0, endedAt: new Date().toISOString() } : { bossHp: next });
+    const current = session?.bossHp ?? bossHpMax;
+    const next = Math.max(0, current - 100);
+    updateSession(
+      next <= 0
+        ? { status: 'completed', bossHp: 0, endedAt: new Date().toISOString() }
+        : { bossHp: next }
+    );
   };
 
   const endGame = () => {
@@ -253,7 +306,7 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
   }
 
   const answeredCount = players.filter((p) => {
-    const m = missions[missionIndex];
+    const m = mission;
     const q = m?.questions?.[questionIndex];
     if (!m || !q) return false;
     return (p.answers || []).some((a: any) => a.missionId === m.id && a.questionId === q.id);
@@ -348,9 +401,9 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
               <div className="grid grid-cols-3 gap-3 mb-6">
                 <div className="text-center p-4 bg-gray-50 rounded-2xl">
                   <p className="text-2xl font-bold">
-                    {missions.length ? missionIndex + 1 : 0}/{missions.length}
+                    {status === 'boss' ? '👹' : `${Math.min(missionIndex + 1, quizCount)}/${quizCount}`}
                   </p>
-                  <p className="text-xs text-quest-text/60">Mission</p>
+                  <p className="text-xs text-quest-text/60">{status === 'boss' ? 'BOSS' : 'Mission'}</p>
                 </div>
                 <div className="text-center p-4 bg-gray-50 rounded-2xl">
                   <p className="text-2xl font-bold">
@@ -396,20 +449,53 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                   </div>
                 </div>
               ) : status === 'boss' ? (
-                <div className="p-4 bg-red-50 rounded-2xl mb-6 text-center">
-                  <div className="text-4xl mb-2">👹</div>
-                  <p className="font-bold mb-1">{game.bossName}</p>
-                  <div className="w-full h-4 bg-white rounded-full overflow-hidden mt-3">
-                    <div
-                      className="h-full bg-gradient-to-r from-red-400 to-red-500 rounded-full transition-all duration-700"
-                      style={{
-                        width: `${Math.max(0, ((session?.bossHp ?? game.bossHp) / (game.bossHp || 1000)) * 100)}%`,
-                      }}
-                    />
+                <div className="p-4 bg-red-50 rounded-2xl mb-6">
+                  <div className="text-center">
+                    <div className="text-4xl mb-2">{bossDefeated ? '🎉' : '👹'}</div>
+                    <p className="font-bold mb-1">{game.bossName}</p>
+                    <div className="w-full h-4 bg-white rounded-full overflow-hidden mt-3">
+                      <div
+                        className="h-full bg-gradient-to-r from-red-400 to-red-500 rounded-full transition-all duration-700"
+                        style={{ width: `${bossHpMax > 0 ? Math.max(0, (bossHpLeft / bossHpMax) * 100) : 0}%` }}
+                      />
+                    </div>
+                    <p className="text-sm text-quest-text/60 mt-2">
+                      HP: {bossHpLeft} / {bossHpMax}
+                      {bossMission && !bossDefeated ? ` • ตอบถูก = บอสเสีย ${BOSS_DAMAGE_PER_CORRECT} HP` : ''}
+                    </p>
+                    {bossDefeated && (
+                      <p className="mt-2 font-bold text-green-600">🎉 ชนะบอสแล้ว!</p>
+                    )}
                   </div>
-                  <p className="text-sm text-quest-text/60 mt-2">
-                    HP: {session?.bossHp ?? game.bossHp} / {game.bossHp}
-                  </p>
+                  {bossMission && question && (
+                    <div className="mt-4 p-4 bg-white/70 rounded-2xl">
+                      <p className="text-xs text-quest-text/60 mb-1">
+                        {bossMission.title} • คำถามบอสที่ {questionIndex + 1}/
+                        {bossMission.questions?.length || 0}
+                      </p>
+                      <p className="font-medium mb-3">{question.text}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {(question.options || []).map((option: string, i: number) => (
+                          <div
+                            key={i}
+                            className={`p-2.5 rounded-xl text-sm ${
+                              i === question.correctAnswer
+                                ? 'bg-green-100 text-green-800 font-medium'
+                                : 'bg-white text-quest-text/70'
+                            }`}
+                          >
+                            {String.fromCharCode(65 + i)}. {option}
+                            {i === question.correctAnswer ? ' (ถูกต้อง)' : ''}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {bossMission && !question && (
+                    <p className="text-center text-quest-text/60 text-sm mt-3">
+                      ยังไม่มีคำถามบอส — ไปเพิ่มในจัดการคำถาม
+                    </p>
+                  )}
                 </div>
               ) : null}
 
@@ -470,29 +556,63 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                       ▶️ เล่นต่อ
                     </button>
                   ) : status === 'boss' ? (
-                    <>
-                      <button
-                        onClick={attackBoss}
-                        disabled={busy}
-                        className="col-span-2 sm:col-span-4 p-4 rounded-2xl bg-red-500 text-white font-bold text-lg hover:bg-red-600 disabled:opacity-50"
-                      >
-                        ⚔️ โจมตี (-100 HP)
-                      </button>
-                      <button
-                        onClick={() => updateSession({ status: 'paused' })}
-                        disabled={busy}
-                        className="p-3 rounded-2xl bg-yellow-100 text-yellow-700 hover:bg-yellow-200 font-medium"
-                      >
-                        ⏸️ หยุด
-                      </button>
-                      <button
-                        onClick={endGame}
-                        disabled={busy}
-                        className="p-3 rounded-2xl bg-gray-100 hover:bg-gray-200 font-medium"
-                      >
-                        🏁 จบเกม
-                      </button>
-                    </>
+                    bossMission ? (
+                      <>
+                        <button
+                          onClick={questionIndex + 1 >= (bossMission.questions?.length || 0) ? endGame : goNext}
+                          disabled={busy}
+                          className="col-span-2 sm:col-span-4 p-4 rounded-2xl bg-primary-500 text-white font-bold text-lg hover:bg-primary-600 disabled:opacity-50"
+                        >
+                          {questionIndex + 1 >= (bossMission.questions?.length || 0)
+                            ? '🏁 จบเกม'
+                            : '⏭️ คำถามบอสถัดไป'}
+                        </button>
+                        <button
+                          onClick={goBack}
+                          disabled={busy || (questionIndex === 0 && quizCount === 0)}
+                          className="p-3 rounded-2xl bg-gray-100 hover:bg-gray-200 font-medium disabled:opacity-40"
+                        >
+                          ← ย้อนกลับ
+                        </button>
+                        <button
+                          onClick={() => updateSession({ status: 'paused' })}
+                          disabled={busy}
+                          className="p-3 rounded-2xl bg-yellow-100 text-yellow-700 hover:bg-yellow-200 font-medium"
+                        >
+                          ⏸️ หยุด
+                        </button>
+                        <button
+                          onClick={() => router.push(`/teacher/analytics?gameId=${gameId}`)}
+                          className="p-3 rounded-2xl bg-lavender-100 text-purple-700 hover:bg-lavender-200 font-medium"
+                        >
+                          📊 ดูผล
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={attackBoss}
+                          disabled={busy}
+                          className="col-span-2 sm:col-span-4 p-4 rounded-2xl bg-red-500 text-white font-bold text-lg hover:bg-red-600 disabled:opacity-50"
+                        >
+                          ⚔️ โจมตี (-100 HP)
+                        </button>
+                        <button
+                          onClick={() => updateSession({ status: 'paused' })}
+                          disabled={busy}
+                          className="p-3 rounded-2xl bg-yellow-100 text-yellow-700 hover:bg-yellow-200 font-medium"
+                        >
+                          ⏸️ หยุด
+                        </button>
+                        <button
+                          onClick={endGame}
+                          disabled={busy}
+                          className="p-3 rounded-2xl bg-gray-100 hover:bg-gray-200 font-medium"
+                        >
+                          🏁 จบเกม
+                        </button>
+                      </>
+                    )
                   ) : null}
                 </div>
               )}
@@ -637,9 +757,15 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                 <p className="text-quest-text/60 text-center py-6">ยังไม่มี Mission</p>
               ) : (
                 <div className="space-y-2">
-                  {missions.map((m: any, index: number) => {
-                    const isCurrent = index === missionIndex && status === 'question';
-                    const isDone = index < missionIndex || status === 'boss' || status === 'completed';
+                  {flowMissions.map((m: any, index: number) => {
+                    const isBoss = m.type === 'boss';
+                    const isCurrent =
+                      index === missionIndex &&
+                      (status === 'question' || (status === 'boss' && isBoss));
+                    const isDone =
+                      index < missionIndex ||
+                      (status === 'boss' && bossMission && index < bossIndex) ||
+                      status === 'completed';
                     return (
                       <div
                         key={m.id}
@@ -658,20 +784,36 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                                 ? 'bg-green-500 text-white'
                                 : isCurrent
                                   ? 'bg-quest-sky text-white'
-                                  : 'bg-gray-200 text-gray-500'
+                                  : isBoss
+                                    ? 'bg-red-100 text-red-600'
+                                    : 'bg-gray-200 text-gray-500'
                             }`}
                           >
-                            {isDone ? '✓' : index + 1}
+                            {isDone ? '✓' : isBoss ? '👹' : index + 1}
                           </div>
                           <div className="min-w-0">
-                            <p className="font-medium text-sm truncate">{m.title}</p>
+                            <p className="font-medium text-sm truncate">
+                              {m.title}
+                              {isBoss && (
+                                <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 text-[10px] font-medium align-middle">
+                                  BOSS
+                                </span>
+                              )}
+                            </p>
                             <p className="text-xs text-quest-text/60">
                               {m.questions?.length || 0} คำถาม • {m.xp} XP
+                              {isBoss ? ` • ตอบถูก = บอสเสีย ${BOSS_DAMAGE_PER_CORRECT} HP` : ''}
                             </p>
                           </div>
                         </div>
                         {isCurrent && (
-                          <span className="text-xs text-quest-sky font-medium shrink-0">กำลังเล่น</span>
+                          <span
+                            className={`text-xs font-medium shrink-0 ${
+                              isBoss ? 'text-red-500' : 'text-quest-sky'
+                            }`}
+                          >
+                            {isBoss && status === 'boss' ? '⚔️ สู้อยู่' : 'กำลังเล่น'}
+                          </span>
                         )}
                       </div>
                     );

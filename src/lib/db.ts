@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'fs/promises';
 import { dirname } from 'path';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { BOSS_DAMAGE_PER_CORRECT } from './utils';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'db.json');
 const DB_SEED_PATH = path.join(process.cwd(), 'data', 'db.default.json');
@@ -335,6 +336,26 @@ export async function getMissions(gameId: string) {
     .sort((a: any, b: any) => a.order - b.order);
 }
 
+/**
+ * Mission ที่ใช้เล่นจริง (ไม่รวมด่านบอส) — ใช้จบรอบควิซแล้วค่อยเข้าบอส
+ * เรียงตาม order เหมือนการ์ดครูมองเห็น
+ */
+export async function getQuizMissions(gameId: string) {
+  return (await getDb()).data.missions
+    .filter((m: any) => m.gameId === gameId && m.type !== 'boss')
+    .sort((a: any, b: any) => a.order - b.order);
+}
+
+/**
+ * ลำดับ Mission ในการเล่น: ควิซทั้งหมดก่อน แล้วด่านบอสต่อท้ายเสมอ
+ * ฝั่งครูกด "ถัดไป" / ฝั่งนักเรียนอ่าน currentMissionIndex ใช้ลำดับนี้เหมือนกัน
+ */
+export function sortMissionsForPlay(list: any[]) {
+  return [...list]
+    .sort((a: any, b: any) => a.order - b.order)
+    .sort((a: any, b: any) => (a.type === 'boss' ? 1 : 0) - (b.type === 'boss' ? 1 : 0));
+}
+
 export const getMission = async (id: string) =>
   (await getDb()).data.missions.find((m: any) => m.id === id);
 
@@ -506,6 +527,64 @@ export async function rollUp(studentId: string | undefined, sessionId: string, p
   });
 }
 
+/**
+ * ปิดรอบเมื่อบอสตาย: ดูจาก "ข้อมูลรวมหลัง merge" ว่าระบุ HP ต่ำกว่า 0 หรือไม่
+ * เพราะตอนหลายคนตอบถูกพร้อมกัน แต่ละคนเห็นข้อมูลเพียงส่วนเดียว ต้องรอรวมแล้วค่อยสรุป
+ * แล้วนำคะแนนของทุกคนในรอบเข้าสถิติถาวร (กันซ้ำด้วย completedSessions)
+ */
+export async function completeSessionWithRollup(gameId: string) {
+  const db = await getDb();
+  const i = currentSessionIndex(db.data.sessions, gameId);
+  if (i === -1) return false;
+  const session = db.data.sessions[i];
+  if (session.status !== 'boss') return false; // ครูจบเกมไปแล้ว
+  if (sessionBossHpLeft(session) > 0) return false; // ข้อมูลยังรวมไม่ครบ/บอสยังไม่ตาย
+
+  session.status = 'completed';
+  session.endedAt = new Date().toISOString();
+  session.timeRunning = false;
+  session.timeDeadline = null;
+
+  const players = db.data.players.filter(
+    (p: any) => p.gameId === gameId && p.sessionId === session.id
+  );
+  await db.write();
+  for (const p of players) {
+    if (p.studentId) await rollUp(p.studentId, session.id, p);
+  }
+  return true;
+}
+
+// รอ "ช่วงลมจับ" ก่อนประกาศจบเกมบอส: HP อาจแตะ 0 พอดีกลาง batch ที่หลายคนตอบพร้อมกัน
+// (เช่น เหลือ 200 HP แล้วคนถัดไปยิงอีก 200 = 0) — ถ้าจบเลย จะ rollUp เก็บคำตอบไม่ครบ
+// เพราะคำตอบที่เหลือยังลอยอยู่ข้างทาง ให้ตีตรา bossDefeatedAt แล้วค่อยจบเมื่อครบเวลา
+const BOSS_SETTLE_MS = 2500;
+
+/**
+ * ตรวจหลัง merge ว่าบอสตายแล้วและเลยช่วงลมจับหรือยัง ถ้าถึงกำหนด → ปิดรอบ (complete+rollUp)
+ * - HP ยัง > 0     → false (ยังไม่ตาย)
+ * - HP <= 0 ครั้งแรก → ตีตรา bossDefeatedAt ยังไม่จบ (ให้คำตอบที่ลอยมาไปถึงครบก่อน)
+ * - เลย BOSS_SETTLE_MS → completeSessionWithRollup
+ */
+export async function settleBossDefeat(gameId: string): Promise<boolean> {
+  const db = await getDb();
+  const i = currentSessionIndex(db.data.sessions, gameId);
+  if (i === -1) return false;
+  const session: any = db.data.sessions[i];
+  if (session.status !== 'boss') return false;
+  if (sessionBossHpLeft(session) > 0) return false;
+
+  if (!session.bossDefeatedAt) {
+    session.bossDefeatedAt = new Date().toISOString();
+    await db.write();
+    return false; // ยังไม่จบ รอคำตอบที่เหลือ
+  }
+  const settled = Date.now() - new Date(session.bossDefeatedAt).getTime() >= BOSS_SETTLE_MS;
+  if (!settled) return false;
+  await completeSessionWithRollup(gameId);
+  return true;
+}
+
 // ==================== TEAMS ====================
 
 export async function createTeams(gameId: string, count: number) {
@@ -596,7 +675,8 @@ function applyTimeAction(s: any, action: string, seconds: any) {
 /** เปลี่ยนคำถาม -> ตั้งเวลาใหม่ตามที่ครูกำหนดไว้ใน Mission (0 = ไม่จับเวลา) */
 function resetTimerForQuestion(s: any, mission: any) {
   const limit = clampTime(mission?.timeLimit);
-  const run = limit > 0 && s.status === 'question';
+  // ทั้งเฟสคำถามปกติและเฟสบอส ให้นาฬิกาเริ่มเดินเองได้
+  const run = limit > 0 && (s.status === 'question' || s.status === 'boss');
   Object.assign(s, {
     timeLimit: limit,
     timeLeft: limit,
@@ -606,12 +686,20 @@ function resetTimerForQuestion(s: any, mission: any) {
   });
 }
 
-function currentSessionIndex(sessions: any[], gameId: string) {
+export function currentSessionIndex(sessions: any[], gameId: string) {
   const mine = sessions.filter((s: any) => s.gameId === gameId);
   if (mine.length === 0) return -1;
   const active = mine.filter((s: any) => s.status !== 'completed');
   const target = active.length > 0 ? active[active.length - 1] : mine[mine.length - 1];
   return sessions.findIndex((s: any) => s.id === target.id);
+}
+
+/** HP บอสที่เหลือ คำนวณจากประวัติโจมตี (กันเขียนพร้อมกันแล้วข้อมูลหาย) */
+export function sessionBossHpLeft(session: any): number {
+  const max = Number(session?.bossHp) || 0;
+  if (max <= 0) return 0;
+  const hits = Array.isArray(session?.bossHits) ? session.bossHits.length : 0;
+  return Math.max(0, max - hits * BOSS_DAMAGE_PER_CORRECT);
 }
 
 /**
@@ -664,7 +752,7 @@ export async function getSession(gameId: string) {
   const i = currentSessionIndex(db.data.sessions, gameId);
   if (i === -1) return undefined;
   const session = db.data.sessions[i];
-  return { ...session, timeLeft: liveTimeLeft(session) };
+  return { ...session, timeLeft: liveTimeLeft(session), bossHpLeft: sessionBossHpLeft(session) };
 }
 
 /**
@@ -682,10 +770,9 @@ export async function updateSessionLive(gameId: string, updates: any) {
   const before = db.data.sessions[i];
   const next: any = { ...before, ...rest };
   const moved = rest.currentMissionIndex != null || rest.currentQuestionIndex != null;
+  // ลำดับ Mission ในการเล่น = ควิซก่อน แล้วบอสต่อท้าย (ตรงกับหน้าครู/นักเรียน)
   const missionAt = (index: number) =>
-    db.data.missions
-      .filter((m: any) => m.gameId === gameId)
-      .sort((a: any, b: any) => a.order - b.order)[index];
+    sortMissionsForPlay(db.data.missions.filter((m: any) => m.gameId === gameId))[index];
 
   if (moved) {
     // ครูเลื่อน/ย้อนคำถาม -> เริ่มจับเวลาใหม่ตามเวลาที่ครูตั้งไว้ใน Mission
@@ -722,7 +809,7 @@ export async function updateSessionLive(gameId: string, updates: any) {
 
   db.data.sessions[i] = next;
   await db.write();
-  return { ...next, timeLeft: liveTimeLeft(next) };
+  return { ...next, timeLeft: liveTimeLeft(next), bossHpLeft: sessionBossHpLeft(next) };
 }
 
 // ==================== TEACHER & SETTINGS ====================

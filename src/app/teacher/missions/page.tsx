@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { isTeacherLoggedIn } from '@/lib/auth';
+import { BOSS_DAMAGE_PER_CORRECT } from '@/lib/utils';
 import TeacherHeader from '@/components/TeacherHeader';
 
 type Question = {
@@ -45,7 +46,7 @@ const blankQuestion = (): Question => ({
   explanation: '',
 });
 
-const blankForm = () => ({ title: '', xp: 100, timeLimit: 60, questions: [] as Question[] });
+const blankForm = () => ({ title: '', xp: 100, timeLimit: 60, type: 'quiz' as 'quiz' | 'boss', questions: [] as Question[] });
 
 function MissionsBuilder() {
   const router = useRouter();
@@ -136,6 +137,7 @@ function MissionsBuilder() {
       title: mission.title || '',
       xp: mission.xp ?? 100,
       timeLimit: mission.timeLimit ?? 60,
+      type: mission.type === 'boss' ? 'boss' : 'quiz',
       questions: (mission.questions || []).map((q) => ({
         id: q.id || uid(),
         text: q.text || '',
@@ -211,7 +213,7 @@ function MissionsBuilder() {
         body: JSON.stringify({
           gameId,
           title: form.title,
-          type: 'quiz',
+          type: form.type,
           xp: Number(form.xp) || 100,
           timeLimit: Math.max(0, Math.min(3600, Number(form.timeLimit) || 0)),
           questions: form.questions,
@@ -335,16 +337,33 @@ function MissionsBuilder() {
                 {missions.map((mission, index) => (
                   <div key={mission.id} className="card p-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-quest-sky to-quest-lavender flex items-center justify-center font-bold text-white shrink-0">
-                        {index + 1}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-medium truncate">{mission.title}</h3>
-                        <p className="text-sm text-quest-text/60">
-                          {mission.xp} XP • {mission.questions?.length || 0} คำถาม •{' '}
-                          {mission.timeLimit ? `⏱️ ${mission.timeLimit} วิ/ข้อ` : 'ไม่จับเวลา'}
-                        </p>
-                      </div>
+                      <div
+                      className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-white shrink-0 ${
+                        mission.type === 'boss'
+                          ? 'bg-gradient-to-br from-red-400 to-red-600'
+                          : 'bg-gradient-to-br from-quest-sky to-quest-lavender'
+                      }`}
+                    >
+                      {mission.type === 'boss' ? '👹' : index + 1}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-medium truncate">
+                        {mission.title}
+                        {mission.type === 'boss' && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 text-[10px] font-medium align-middle">
+                            BOSS
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-sm text-quest-text/60">
+                        {mission.xp} XP • {mission.questions?.length || 0} คำถาม •{' '}
+                        {mission.timeLimit ? `⏱️ ${mission.timeLimit} วิ/ข้อ` : 'ไม่จับเวลา'}
+                        {
+                          mission.type === 'boss' &&
+                            ` • ตอบถูก = บอสเสีย ${BOSS_DAMAGE_PER_CORRECT} HP`
+                        }
+                      </p>
+                    </div>
                     </div>
 
                     <div className="flex flex-wrap gap-2 mt-3">
@@ -444,6 +463,44 @@ function MissionsBuilder() {
                 <p className="text-xs text-quest-text/60 mt-2">
                   ใส่ 0 = ไม่จับเวลา • ครูยังบวก/ลดเวลาได้ตอนเล่นจริงเสมอ
                 </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">ประเภท Mission</label>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, type: 'quiz' })}
+                    className={`px-4 py-2.5 rounded-2xl text-sm font-medium transition-all ${
+                      form.type === 'quiz'
+                        ? 'bg-quest-sky text-white shadow-sm'
+                        : 'bg-sky-50 text-sky-700 hover:bg-sky-100'
+                    }`}
+                  >
+                    📚 แบบฝึกหัดปกติ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, type: 'boss' })}
+                    className={`px-4 py-2.5 rounded-2xl text-sm font-medium transition-all ${
+                      form.type === 'boss'
+                        ? 'bg-red-500 text-white shadow-sm'
+                        : 'bg-red-50 text-red-600 hover:bg-red-100'
+                    }`}
+                  >
+                    👹 ด่านบอส
+                  </button>
+                </div>
+                {form.type === 'boss' ? (
+                  <p className="text-xs text-quest-text/60 mt-2">
+                    เล่นตอนสุดท้ายหลังจบด่านควิซทั้งหมด — นักเรียนตอบถูก 1 ข้อ = บอสเสีย {BOSS_DAMAGE_PER_CORRECT} HP
+                    เมื่อ HP บอสหมด = ชนะ (คำตอบบอสยังนับคะแนนปกติ)
+                  </p>
+                ) : (
+                  <p className="text-xs text-quest-text/60 mt-2">
+                    เล่นตามลำดับ ครูกด &quot;ถัดไป&quot; เพื่อเลื่อนด่านเอง
+                  </p>
+                )}
               </div>
 
               <div>

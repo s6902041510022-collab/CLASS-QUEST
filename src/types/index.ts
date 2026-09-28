@@ -28,7 +28,7 @@ export interface Mission {
   order: number;
   title: string;
   description: string;
-  type: 'quiz' | 'matching' | 'sorting' | 'drag-drop' | 'scenario' | 'decision' | 'speed' | 'memory' | 'team';
+  type: 'quiz' | 'boss' | 'matching' | 'sorting' | 'drag-drop' | 'scenario' | 'decision' | 'speed' | 'memory' | 'team';
   xp: number;
   timeLimit: number;
   questions: Question[];
@@ -85,6 +85,17 @@ export interface GameSession {
   /** เวลาสิ้นสุดแบบ epoch ms — ใช้นับถอยหลังโดยไม่ต้องยิงเซิร์ฟเวอร์ */
   timeDeadline: number | null;
   timePausedByGame?: boolean;
+  /** ประวัติการโจมตีบอส (นักเรียนตอบถูก 1 ข้อ = บอสเสีย 1 ครั้ง) — merge ปลอดภัยเพราะเป็น array มี id */
+  bossHits?: BossHit[];
+  /** จำนวน HP ที่เหลือ คิดจาก bossHits (ได้จากการคำนวณ ไม่ใช่ค่าเก็บ) */
+  bossHpLeft?: number;
+}
+
+export interface BossHit {
+  id: string;
+  questionId: string;
+  playerId: string;
+  at: string;
 }
 
 export interface Achievement {

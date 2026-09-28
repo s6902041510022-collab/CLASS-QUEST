@@ -5,6 +5,9 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** ความเสียหายที่บอสได้รับ เมื่อนักเรียนตอบคำถามบอสถูก 1 ข้อ */
+export const BOSS_DAMAGE_PER_CORRECT = 200;
+
 export function generateId(): string {
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 }

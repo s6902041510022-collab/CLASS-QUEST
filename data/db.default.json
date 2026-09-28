@@ -88,6 +88,45 @@
       ],
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "demo-boss-mission",
+      "gameId": "demo-game-1",
+      "title": "ด่านสุดท้าย: มอนเตอร์ไบต์",
+      "type": "boss",
+      "xp": 200,
+      "timeLimit": 45,
+      "order": 3,
+      "questions": [
+        {
+          "id": "demo-bq-1",
+          "text": "หน่วยใดเก็บข้อมูลเพื่อให้ CPU เข้าถึงได้เร็วที่สุด?",
+          "options": ["Cache", "RAM", "HDD", "SSD"],
+          "correctAnswer": 0,
+          "explanation": "ถูกต้อง! ยิงบอส — ตอบถูก 1 ข้อ = บอสเสีย 200 HP"
+        },
+        {
+          "id": "demo-bq-2",
+          "text": "หน่วยความจำแบบใดไม่ต้องใช้ไฟเลี้ยงเพื่อเก็บข้อมูล?",
+          "options": ["ROM", "RAM", "Cache", "Register"],
+          "correctAnswer": 0,
+          "explanation": "ถูกต้อง! ROM คือหน่วยความจำถาวร ข้อมูลไม่หายเมื่อไฟดับ"
+        },
+        {
+          "id": "demo-bq-3",
+          "text": "RAM ย่อมาจากอะไร?",
+          "options": [
+            "Random Access Memory",
+            "Read Access Memory",
+            "Run All Memory",
+            "Rapid Access Module"
+          ],
+          "correctAnswer": 0,
+          "explanation": "ถูกต้อง! โจมตีครั้งสุดท้ายถ้าบอสยังเหลือ HP"
+        }
+      ],
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
     }
   ],
   "students": [

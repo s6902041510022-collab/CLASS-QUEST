@@ -1,7 +1,7 @@
 # CLASS QUEST — บันทึกงานไว้ก่อนกลับมาทำต่อ
 
 > อัปเดตล่าสุด: 28 ก.ย. 2026
-> งานทั้งหมด commit ไว้แล้วที่ commit `f1a6de7` — เน็ตหมดก็ไม่หาย
+> งานบอส "นักเรียนตอบได้" เสร็จ + เทสต์ผ่าน 2 โหมดแล้ว (ยังไม่ commit ขั้นต่อไป)
 
 ---
 
@@ -17,15 +17,19 @@
 - ควบคุมห้องเล่น: เริ่ม/ถัดไป/ย้อนกลับ/หยุด/จบเกม
 - **จับเวลา**: ตั้ง / +30วิ / −30วิ / +1นาที / −1นาที / หยุด / เล่น / รีเซ็ต / ปิด
 - วิเคราะห์ผล: รายเกม / รายคน / รายข้อ
+- **Boss ด่าน:** สลับ "ด่านบอส" ในฟอร์ม Mission (👹 บังคับเล่นตอนสุดท้ายเสมอ)
+  ดู HP บอสสด (คำนวณจาก `bossHits` × 200) + ประกาศชนะเมื่อ HP = 0
 
 **ฝั่งนักเรียน** (เลือกชื่อตัวเองจากรายชื่อที่ครูสร้าง)
 - เข้าร่วม → ห้องรอ → เล่นควิซ → เห็นถูก/ผิด + เหตุผล + ประวัติของตัวเอง
 - เห็นแถบนับถอยหลัง + ถูกล็อกเมื่อหมดเวลา (ครูบวกเวลากลับได้ ปลดล็อกเอง)
+- **ต่อสู้บอส:** ตอบคำถามบอส ตอบถูก = บอสเสีย HP (ตอนนี้ 1 ข้อ = 200 HP) — เห็น HP bar
+  + ข้อที่เหลือ + ฉากชนะเมื่อ HP บอสหมด
 
 **ระบบ**
 - 14 routes ตอบ 200 หมด, `npx tsc --noEmit` = 0 error, `npm run build` ผ่าน
-- 2 โหมดเก็บข้อมูล (เลือกอัตโนมัติจาก env) ทดสอบผ่านทั้งคู่
-- เทสต์ 20 คน + 40 คนพร้อมกัน → ไม่มีข้อมูลหาย
+- 2 โหมดเก็บข้อมูล (เลือกอัตโนมัติจาก env) — **งานบอสเทสต์ผ่านทั้ง 2 โหมด**
+- เทสต์ 20 คน + 40 คนพร้อมกัน → ไม่มีข้อมูลหาย (รวมตอนตอบบอสพร้อมกัน)
 - ข้อมูลรอด 100% หลังปิด-เปิด dev server
 
 ### ❌ ยังไม่ได้ทำ
@@ -34,10 +38,9 @@
 |---|---|---|
 | 1 | ขึ้น GitHub | ค้างรอ `gh auth login` (ต้องรันเอง) |
 | 2 | Deploy Vercel | ค้างรอ repo + ค่า KV |
-| 3 | **Boss ให้นักเรียนตอบได้** | ออกแบบไว้แล้ว ดูหัวข้อ 4 |
-| 4 | เนื้อหาเกมจริง | มีแค่ตัวอย่าง 1 เกม (`demo-game-1`) 2 ด่าน |
-| 5 | README / เอกสารครู | ยังไม่ได้เขียน |
-| 6 | ทดสอบมือถือจริง | ที่ผ่านมาเป็นการจำลองผ่าน API |
+| 3 | เนื้อหาเกมจริง | มีแค่ตัวอย่าง 1 เกม (`demo-game-1`): 2 ด่านควิซ + 1 ด่านบอส |
+| 4 | README / เอกสารครู | ยังไม่ได้เขียน |
+| 5 | ทดสอบมือถือจริง | ที่ผ่านมาเป็นการจำลองผ่าน API |
 
 ---
 
@@ -90,54 +93,67 @@ gh auth login
 
 ---
 
-## 4. แผน: Boss ให้นักเรียนตอบได้
+## 4. Boss ให้นักเรียนตอบได้ — ✅ เสร็จแล้ว
 
-**ปัญหาปัจจุบัน:** เข้าเฟส Boss แล้วนักเรียนได้แค่ดู ไม่ได้ตอบ
-ครูต้องกดปุ่ม "โจมตี -100 HP" เอง (`teacher/game/[id]/page.tsx` → `attackBoss`)
-สเปกเดิมที่ผู้ใช้ให้คือ "Boss: Simple (HP + **คำถาม**)"
+**สิ่งที่ทำ:** นักเรียนตอบคำถามบอสได้เลย ตอบถูก = บอสเสีย HP ครูกดปุ่ม "โจมตี" แบบเดิมมีไว้เฉพาะเกมเก่าที่ไม่มีด่านบอส (legacy fallback)
 
-**แนวทางที่ออกแบบไว้** (ยังไม่ได้ลงมือ — ใช้ต่อได้เลย)
+**กติกาที่ตัดสินไว้:**
+- ตอบถูก → บอสเสีย `BOSS_DAMAGE_PER_CORRECT` = **200 HP** (ค่าเดียวใน `src/lib/utils.ts` ใช้ทุกหน้า)
+- ตอบผิด → บอสไม่เสีย HP แต่ยังได้คะแนนตามปกติ (ข้อบอสคือคำถามธรรมดา)
+- HP บอสหมด → ปิดรอบ + `rollUp()` เข้าสถิติถาวร (คำตอบบอสถูกนับในสถิติ/วิเคราะห์อัตโนมัติ)
+- Mission บอสเล่นตอนสุดท้ายเสมอ — `sortMissionsForPlay()` เรียงด่านควิซก่อน บอสต่อท้าย (เซิร์ฟเวอร์ + หน้าครู + หน้านักเรียนใช้ตัวเดียวกัน)
+- โหมดเก่า (ไม่มี Mission บอส): คง `attackBoss` ครูกดเอง 100 HP + นักเรียนเห็น "รอครูสั่งโจมตี"
 
-1. **ใช้ Mission ที่มีอยู่แล้วเป็นคำถามบอส** — ไม่ต้องเพิ่มตารางข้อมูลใหม่
-   - เพิ่ม `Mission.type` ค่า `'boss'` (ตอนนี้ union ใน `types/index.ts:31` ยังไม่มี)
-   - ในหน้า `teacher/missions` เพิ่มตัวเลือก "ด่านบอส" ในฟอร์ม Mission
-   - `getMissions()` เดิมคืนทั้งหมด (ครูต้องเห็น) → เพิ่ม `getQuizMissions()` ที่ตัด type `'boss'` ออก ไว้ให้ flow เล่นปกติใช้
+**ข้อมูล HP กันหายตอนตอบพร้อมกัน:**
+- **`session.bossHits[]`** (array `{id, questionId, playerId, at}`) — เก็บประวัติโจมตีแทน scalar
+  merge ปลอดภัยเพราะมี id; `bossHpLeft = max(0, bossHp − hits×200)` คำนวณจากความยาว array เสมอ
+- **ประกาศชนะหลัง merge เท่านั้น** — หลัง `db.write()` อ่านข้อมูลรวมอีกครั้ง ถ้า HP ≤ 0 → `completeSessionWithRollup(gameId)`
+  (เดิมตรวจจาก snapshot ก่อน merge จะพลาดจบเกมเมื่อตอบพร้อมกัน)
 
-2. **จุดที่ต้องแก้**
-   | ไฟล์ | ต้องทำอะไร |
-   |---|---|
-   | `src/lib/db.ts` | เพิ่ม `getQuizMissions()`; ใน `updateSessionLive()` เพิ่ม branch `rest.status === 'boss'` เพื่อรีเซ็ตนาฬิกาตาม Mission บอส |
-   | `src/app/api/answers/route.ts` | ถ้า session เป็น boss และตอบถูก → ลด `session.bossHp` (คิดใน write เดียวกับคำตอบ ไม่ต้องเพิ่มรอบเขียน) |
-   | `src/app/teacher/game/[id]/page.tsx` | `goNext()` เข้า boss → ตั้ง `currentMissionIndex` = index ของ Mission บอส, `currentQuestionIndex: 0`; ปุ่มในเฟส boss เปลี่ยนจาก "โจมตี" เป็น "ถัดไป" |
-   | `src/app/student/game/[id]/page.tsx` | เฟส boss ต้องแสดงคำถาม + ปุ่มตอบ (ตอนนี้ return ออกไปก่อนถึง UI คำถาม) |
-   | `src/types/index.ts` | เพิ่ม `'boss'` ใน `Mission['type']` |
+**Bug ที่เจอระหว่างเทสต์ Redis (file mode ตรวจไม่เจอ):**
+- บอส HP ถึง 0 **ก่อนที่คำตอบที่ส่งพร้อมกันจะมาถึงครบ** (เช่น HP เหลือ 200 แล้วคนแรกของ batch ยิงอีก 200 =
+  0 พอดี) → `completeSessionWithRollup` รันก่อน → rollUp ได้คำตอบหายไปหลายข้อ
+- **วิธีแก้ = "ช่วงลมจับ" (settle window):** HP ถึง 0 ครั้งแรก → ตีตรา `session.bossDefeatedAt`
+  (ยังไม่จบ ให้คำตอบที่ลอยมาไม่ถูกทิ้ง) → เมื่อเลย `BOSS_SETTLE_MS` (2.5 วิ) → `completeSessionWithRollup`
+- จุดที่เช็ค: `answers/route.ts` หลังทุกคำตอบบอส + `sessions/route.ts` GET (ครู/นักเรียน poll มาเรื่อย ๆ
+  เป็นตัวปิดรอบสำรอง)
 
-3. **กติกาที่ตัดสินไว้**
-   - ตอบถูก → บอสเสีย HP (เช่น 200) + ได้ XP
-   - ตอบผิด → บอสไม่เสีย HP
-   - HP = 0 → `status: 'completed'` (นักเรียนชนะ)
-   - คำถามบอสหมดแต่บอสยังมีชีวิต → ครูกด "จบเกม" เอง
-   - **ไม่ต้องแยกตารางเก็บคำตอบบอส** — `rollUp()` อ่านจาก `player.answers` อยู่แล้ว
-     คำตอบบอสจึงถูกนับในสถิติ/ประวัติ/วิเคราะห์อัตโนมัติ
+**จุดที่แก้ไป:**
+| ไฟล์ | ทำอะไร |
+|---|---|
+| `src/types/index.ts` | `Mission.type` เพิ่ม `'boss'` + `BossHit` + `bossHits`/`bossDefeatedAt` ใน `GameSession` |
+| `src/lib/db.ts` | `getQuizMissions()`, `sortMissionsForPlay()`, `sessionBossHpLeft()`, `completeSessionWithRollup()`, `settleBossDefeat()`, `resetTimerForQuestion()` เฟส boss, `updateSessionLive()` คืน `bossHpLeft`, export `currentSessionIndex` |
+| `src/lib/utils.ts` | `BOSS_DAMAGE_PER_CORRECT = 200` |
+| `src/app/api/answers/route.ts` | write คำตอบ + bossHit ในรอบเดียว, ตรวจผลหลัง merge, settle window |
+| `src/app/api/sessions/route.ts` | GET เรียก `settleBossDefeat()` (ตัวปิดรอบสำรอง) |
+| `src/app/teacher/game/[id]/page.tsx` | flow ด่านบอส + HP bar + `.bossHpLeft` |
+| `src/app/student/game/[id]/page.tsx` | การ์ดบอส (HP bar + คำถาม + ตอบ + ฉากชนะ) |
+| `src/app/teacher/missions/page.tsx` | สลับ 📚 / 👹 + badge BOSS |
+| `data/db.default.json` | `demo-boss-mission` (order 3, demo bossHp 500 = 3 ข้อถูกชนะ) |
 
-4. **จุดที่ต้องระวัง**
-   - `updatePlayer()` เขียนทีละคน ถ้า 40 คนตอบถูกพร้อมกัน ต้องไม่ทำ HP ติดลบ
-     (merge 3-way ใน `db.ts` ช่วยได้ แต่ต้อง **คำนวณจากค่าล่าสุดที่อ่านมา** ไม่ใช่ค่าที่ client ส่งมา)
-   - `/api/answers` ตอนนี้เรียก `getDb()` แล้ว `updatePlayer()` ซึ่งเรียก `getDb()` อีกครั้ง
-     — ถ้าจะลด HP ด้วย ให้เขียนรวมใน `db.write()` ครั้งเดียว
+**เทสต์ที่เพิ่ม:** `C:\Users\Namex\AppData\Local\Temp\opencode\test-boss.js` — 24 เคส:
+สร้าง student ใหม่ทุกชุดกันสถิติเก่า, ใช้ `game.id` จริงเป็น GID, 4 ถูก q1 → HP 200,
+คำถามบอสข้อ 2 ตอบถูกพร้อมกัน 6 คน → บอสตาย + rollUp + analytics (ผ่านทั้งโหมดไฟล์และ Redis)
 
 ---
 
 ## 5. เทสต์ที่ต้องรันซ้ำก่อน deploy
 
-| สคริปต์ | ตรวจอะไร |
-|---|---|
-| `C:\Users\Namex\AppData\Local\Temp\opencode\test-load.js` | 20 คนพร้อมกัน, ไม่มีข้อมูลหาย |
-| `C:\Users\Namex\AppData\Local\Temp\opencode\test-stress.js` | 40 คน × 3 ข้อ |
-| `C:\Users\Namex\AppData\Local\Temp\opencode\test-timer.js` | นาฬิกา 26 เคส |
-| `C:\Users\Namex\AppData\Local\Temp\opencode\mock-upstash.js` | mock Upstash REST (พอร์ต 6399) ใช้เทสต์โหมด Redis |
+| สคริปต์ | ตรวจอะไร | ผลล่าสุด (2 โหมด) |
+|---|---|---|
+| `C:\Users\Namex\AppData\Local\Temp\opencode\test-boss.js` | ด่านบอส: ตอบถูกลด HP, ชนะพร้อมกัน, rollUp | 24/24 ✅ |
+| `C:\Users\Namex\AppData\Local\Temp\opencode\test-timer.js` | นาฬิกา 26 เคส | 26/26 ✅ |
+| `C:\Users\Namex\AppData\Local\Temp\opencode\test-load.js` | 20 คนพร้อมกัน, ไม่มีข้อมูลหาย | 20/20 ✅ |
+| `C:\Users\Namex\AppData\Local\Temp\opencode\test-stress.js` | 40 คน × 3 ข้อ | 40/40 ✅ |
+| `C:\Users\Namex\AppData\Local\Temp\opencode\mock-upstash.js` | mock Upstash REST (พอร์ต 6399) ใช้เทสต์โหมด Redis | — |
 
-ทั้งหมดต้องรันทั้ง 2 โหมด (ไฟล์ + Redis)
+**ต้องรันทั้ง 2 โหมด:** ในโหมด Redis ให้รีสตาร์ท mock ก่อน `test-load` เสมอ
+(มันใช้ `students[0..19]` ที่มีสถิติสะสมได้ → ต้องเริ่มจาก state เปล่าเหมือน reset `db.json` ในโหมดไฟล์)
+`test-stress` สร้าง student + session ใหม่เอง (`force: true`) ไม่ต้องรีสตาร์ท
+`test-boss` สร้าง student ใหม่ทุกชุด ไม่ต้องรีสตาร์ท
+
+> **สำคัญ:** `test-boss` ต้องเช็คตาม `players[].studentId` ไม่ใช่สมมุติว่า `players[i]` เรียงตรง `students[i]`
+> (getPlayers เรียงต่างจากตอนสร้าง — ถ้าเช็คผิดจะ FAIL ทั้งที่แอปถูก)
 
 ---
 
@@ -153,6 +169,8 @@ gh auth login
 - `/student/results` และ `/api/play-records` **ถูกลบแล้ว** — อย่าอ้างถึง
 - ข้อมูลผูกกับ **student record** ไม่ใช่ device — `players` ผูกกับ `sessionId`
   ประวัติ derive จาก `players` ผ่าน `getStudentHistory()` ไม่มี `playRecords` แล้ว
+- **HP บอสห้ามเก็บเป็น scalar ที่บวกลบ** — ใช้ `session.bossHits[]` array + คำนวณ `bossHpLeft` เสมอ
+  และประกาศชนะ**หลัง merge** เท่านั้น (ดูหัวข้อ 4 — เจอ bug ตายก่อนกำหนดเมื่อตอบพร้อมกัน)
 
 ---
 

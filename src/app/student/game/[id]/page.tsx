@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { MASCOT } from '@/lib/utils';
+import { MASCOT, BOSS_DAMAGE_PER_CORRECT } from '@/lib/utils';
 
 export default function StudentGamePage({ params }: { params: { id: string } }) {
   const gameId = params.id;
@@ -159,7 +159,22 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
   const status = session?.status || 'lobby';
   const mIdx = session?.currentMissionIndex ?? 0;
   const qIdx = session?.currentQuestionIndex ?? 0;
-  const mission = missions[mIdx];
+
+  // ลำดับเล่น = ด่านควิซก่อน แล้วด่านบอสต่อท้าย (ตรงกับเซิร์ฟเวอร์/หน้าครู)
+  const flowMissions = [...missions]
+    .sort((a: any, b: any) => a.order - b.order)
+    .sort((a: any, b: any) => (a.type === 'boss' ? 1 : 0) - (b.type === 'boss' ? 1 : 0));
+  const flowQuizMissions = flowMissions.filter((m: any) => m.type !== 'boss');
+  const isBoss = status === 'boss';
+  const bossHpMax = Number(game?.bossHp) || 1000;
+  const bossHits = Array.isArray(session?.bossHits) ? session.bossHits.length : 0;
+  const bossHpLeft =
+    typeof session?.bossHpLeft === 'number'
+      ? session.bossHpLeft
+      : Math.max(0, bossHpMax - bossHits * BOSS_DAMAGE_PER_CORRECT);
+  const bossDefeated = bossHpLeft <= 0;
+
+  const mission = flowMissions[mIdx];
   const question = mission?.questions?.[qIdx];
 
   // จบเกมแล้ว
@@ -181,10 +196,8 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
     );
   }
 
-  // BOSS
-  if (status === 'boss') {
-    const hp = session?.bossHp ?? game.bossHp;
-    const max = game.bossHp || 1000;
+  // BOSS (ยังไม่มีคำถามบอส = โหมดเก่า รอครูกดโจมตีเอง)
+  if (status === 'boss' && !question) {
     return (
       <div className={bg}>
         <div className="card w-full max-w-md p-8 text-center">
@@ -195,13 +208,13 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
             <div className="flex justify-between mb-2 text-sm">
               <span className="font-medium">HP บอส</span>
               <span className="text-quest-text/60">
-                {hp} / {max}
+                {bossHpLeft} / {bossHpMax}
               </span>
             </div>
             <div className="w-full h-6 bg-gray-200 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-red-400 to-red-500 rounded-full transition-all duration-700"
-                style={{ width: `${Math.max(0, (hp / max) * 100)}%` }}
+                style={{ width: `${Math.max(0, (bossHpLeft / bossHpMax) * 100)}%` }}
               />
             </div>
           </div>
@@ -212,7 +225,7 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
   }
 
   // หยุด / ยังไม่มีคำถาม
-  if (status !== 'question' || !question) {
+  if ((status !== 'question' && status !== 'boss') || !question) {
     return (
       <div className={bg}>
         <div className="card w-full max-w-md p-8 text-center">
@@ -229,23 +242,55 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
   return (
     <div className={bg}>
       <div className="card w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-4">
-          <span className="font-medium text-sm">
-            Mission {mIdx + 1}/{missions.length}
-          </span>
-          <span className="text-quest-text/60 text-sm">คำถามที่ {qIdx + 1}</span>
-        </div>
+        {isBoss ? (
+          <div className="mb-5">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2.5">
+                <span className={`text-4xl ${bossDefeated ? 'animate-float' : 'animate-bounce-soft'}`}>
+                  {bossDefeated ? '🎉' : '👹'}
+                </span>
+                <div>
+                  <p className="font-bold leading-tight">{game.bossName || 'บอส'}</p>
+                  <p className="text-xs text-quest-text/60">{mission?.title}</p>
+                </div>
+              </div>
+              <span className="text-sm font-medium tabular-nums">
+                {bossHpLeft} / {bossHpMax}
+              </span>
+            </div>
+            <div className="w-full h-5 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ${
+                  bossDefeated ? 'bg-accent-400' : 'bg-gradient-to-r from-red-400 to-red-500'
+                }`}
+                style={{ width: `${bossHpMax > 0 ? Math.max(0, (bossHpLeft / bossHpMax) * 100) : 0}%` }}
+              />
+            </div>
+            <p className="text-xs text-quest-text/60 mt-1.5 text-center">
+              {bossDefeated ? '🎉 ชนะบอสแล้ว!' : `ตอบถูก = บอสเสีย ${BOSS_DAMAGE_PER_CORRECT} HP!`}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-4">
+              <span className="font-medium text-sm">
+                Mission {mIdx + 1}/{flowQuizMissions.length}
+              </span>
+              <span className="text-quest-text/60 text-sm">คำถามที่ {qIdx + 1}</span>
+            </div>
 
-        <div className="flex gap-1.5 mb-6">
-          {missions.map((_, i) => (
-            <div
-              key={i}
-              className={`flex-1 h-2 rounded-full ${
-                i < mIdx ? 'bg-green-400' : i === mIdx ? 'bg-quest-sky' : 'bg-gray-200'
-              }`}
-            />
-          ))}
-        </div>
+            <div className="flex gap-1.5 mb-6">
+              {flowQuizMissions.map((_, i) => (
+                <div
+                  key={i}
+                  className={`flex-1 h-2 rounded-full ${
+                    i < mIdx ? 'bg-green-400' : i === mIdx ? 'bg-quest-sky' : 'bg-gray-200'
+                  }`}
+                />
+              ))}
+            </div>
+          </>
+        )}
 
         {timeLimit > 0 && (
           <div className="mb-4">
@@ -330,6 +375,12 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
               </div>
             )}
 
+            {answer.bossHit && (
+              <div className="inline-block px-4 py-2 bg-red-100 text-red-700 rounded-full font-bold">
+                ⚔️ บอสเสีย {BOSS_DAMAGE_PER_CORRECT} HP!
+              </div>
+            )}
+
             {answer.explanation && (
               <div className="p-4 bg-orange-50 rounded-2xl text-left">
                 <p className="text-xs font-medium text-orange-700 mb-1">💡 เรียนรู้อะไรได้</p>
@@ -337,7 +388,9 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
               </div>
             )}
 
-            <p className="text-quest-text/60 text-sm pt-1">รอครูไปคำถามถัดไป...</p>
+            <p className="text-quest-text/60 text-sm pt-1">
+              {isBoss ? 'รอครูไปคำถามบอสถัดไป...' : 'รอครูไปคำถามถัดไป...'}
+            </p>
           </div>
         )}
       </div>
