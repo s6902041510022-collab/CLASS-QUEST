@@ -1,0 +1,9 @@
+{
+  "skills": [
+    {
+      "name": "edu-web-dev",
+      "path": "skills/education-web-dev",
+      "description": "Skill สำหรับพัฒนาเว็บเพื่อการศึกษา โดยใช้ Next.js + TypeScript + Tailwind CSS + Vercel พร้อมระบบดีไซน์ที่สวยงาม มินิมอล"
+    }
+  ]
+}

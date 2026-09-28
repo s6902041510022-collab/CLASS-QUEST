@@ -1,0 +1,14 @@
+{
+  "skills": [
+    {
+      "id": "edu-web-dev",
+      "name": "edu-web-dev",
+      "description": "Skill สำหรับพัฒนาเว็บเพื่อการศึกษา โดยใช้ Next.js + TypeScript + Tailwind CSS + Vercel พร้อมระบบดีไซน์ที่สวยงาม มินิมอล",
+      "path": "skills/education-web-dev",
+      "entry": "skill.md",
+      "type": "development",
+      "category": "web-development",
+      "tags": ["education", "web-development", "nextjs", "typescript", "tailwind", "vercel"]
+    }
+  ]
+}

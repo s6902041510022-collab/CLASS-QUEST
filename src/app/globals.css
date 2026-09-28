@@ -1,0 +1,141 @@
+@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --quest-white: #FFFFFF;
+  --quest-sky: #7DD3FC;
+  --quest-lavender: #C4B5FD;
+  --quest-mint: #A7F3D0;
+  --quest-orange: #FDBA74;
+  --quest-text: #334155;
+}
+
+@layer base {
+  * {
+    @apply border-gray-200;
+  }
+
+  body {
+    @apply bg-quest-white text-quest-text font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold tracking-tight;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-6 py-3 bg-quest-sky text-white font-medium rounded-2xl hover:bg-sky-400 transition-all shadow-soft hover:shadow-medium active:scale-95;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 bg-white text-quest-text font-medium rounded-2xl border-2 border-gray-200 hover:border-quest-sky hover:text-quest-sky transition-all;
+  }
+
+  .btn-success {
+    @apply px-6 py-3 bg-quest-mint text-green-700 font-medium rounded-2xl hover:bg-green-300 transition-all;
+  }
+
+  .btn-warning {
+    @apply px-6 py-3 bg-quest-orange text-orange-700 font-medium rounded-2xl hover:bg-orange-300 transition-all;
+  }
+
+  .card {
+    @apply bg-white rounded-3xl border border-gray-100 shadow-soft;
+  }
+
+  .card-hover {
+    @apply transition-all duration-300 hover:shadow-medium hover:-translate-y-1;
+  }
+
+  .input {
+    @apply w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-quest-sky focus:border-transparent transition-all;
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-quest-sky to-quest-lavender bg-clip-text text-transparent;
+  }
+
+  .mascot-shadow {
+    filter: drop-shadow(0 4px 6px rgb(196 181 253 / 0.3));
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Custom Animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+@keyframes bounce-soft {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
+}
+
+.animate-bounce-soft {
+  animation: bounce-soft 2s ease-in-out infinite;
+}
+
+/* XP Popup Animation */
+@keyframes xp-popup {
+  0% { opacity: 0; transform: translateY(10px) scale(0.8); }
+  50% { opacity: 1; transform: translateY(-5px) scale(1.1); }
+  100% { opacity: 0; transform: translateY(-20px) scale(1); }
+}
+
+.animate-xp-popup {
+  animation: xp-popup 1.5s ease-out forwards;
+}
+
+/* Boss Hit Animation */
+@keyframes boss-hit {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+.animate-boss-hit {
+  animation: boss-hit 0.3s ease-out;
+}
+
+/* Confetti Animation */
+@keyframes confetti-fall {
+  0% { transform: translateY(-100vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+
+.animate-confetti {
+  animation: confetti-fall 3s ease-in-out forwards;
+}
