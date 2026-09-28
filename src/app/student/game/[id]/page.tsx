@@ -48,7 +48,8 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
         const r = await fetch(`/api/sessions?gameId=${gameId}`).then((x) => x.json());
         if (!cancelled && r.success) {
           setSession(r.data);
-          const key = `${r.data?.status}-${r.data?.currentMissionIndex}-${r.data?.currentQuestionIndex}`;
+          // รวมสถานะนาฬิกาเข้า key ด้วย เพื่อให้รู้เร็ว ๆ ว่าครูกดบวก/ลด/หยุดเวลา
+          const key = `${r.data?.status}-${r.data?.currentMissionIndex}-${r.data?.currentQuestionIndex}-${r.data?.timeRunning}-${r.data?.timeDeadline}`;
           sameCount = key === lastKey ? sameCount + 1 : 0;
           lastKey = key;
         }
@@ -72,6 +73,33 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
     setAnswer(null);
     setError('');
   }, [session?.currentMissionIndex, session?.currentQuestionIndex]);
+
+  // ---------- จับเวลา ----------
+  // นับเองบนเครื่อง โดยยึด "เวลาสิ้นสุด" จากเซิร์ฟเวอร์ — เบราว์เซอร์คนละเครื่องก็เห็นเวลาตรงกัน
+  const [now, setNow] = useState(() => Date.now());
+  const [deadline, setDeadline] = useState<number | null>(null);
+
+  useEffect(() => {
+    setDeadline(
+      session?.timeRunning && session?.timeDeadline ? Number(session.timeDeadline) : null
+    );
+  }, [session?.timeRunning, session?.timeDeadline, session?.id]);
+
+  useEffect(() => {
+    if (deadline == null) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [deadline]);
+
+  const timeLimit = Number(session?.timeLimit) || 0;
+  const timeLeft = timeLimit
+    ? deadline != null
+      ? Math.max(0, Math.ceil((deadline - now) / 1000))
+      : Math.max(0, Number(session?.timeLeft) || 0)
+    : 0;
+  const timeUp = timeLimit > 0 && timeLeft <= 0;
+  const timePct = timeLimit > 0 ? Math.max(0, Math.min(100, (timeLeft / timeLimit) * 100)) : 0;
 
   const submit = useCallback(async () => {
     if (selected == null || !playerId) return;
@@ -219,6 +247,35 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
           ))}
         </div>
 
+        {timeLimit > 0 && (
+          <div className="mb-4">
+            <div className="flex items-center justify-between text-sm mb-1.5">
+              <span
+                className={`font-medium ${
+                  timeUp ? 'text-red-500' : timeLeft <= 10 ? 'text-warm-500' : 'text-quest-text/60'
+                }`}
+              >
+                {timeUp ? '⏰ หมดเวลาแล้ว!' : '⏳ เหลืออีก'}
+              </span>
+              <span
+                className={`font-bold tabular-nums ${
+                  timeUp ? 'text-red-500' : timeLeft <= 10 ? 'text-warm-500' : 'text-quest-text/70'
+                }`}
+              >
+                {timeUp ? '0' : timeLeft} วินาที
+              </span>
+            </div>
+            <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-[width] duration-300 ${
+                  timeUp ? 'bg-red-400' : timeLeft <= 10 ? 'bg-warm-400' : 'bg-accent-400'
+                }`}
+                style={{ width: `${timePct}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-xl text-sm text-center">
             {error}
@@ -233,7 +290,8 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
                 <button
                   key={i}
                   onClick={() => setSelected(i)}
-                  className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
+                  disabled={timeUp}
+                  className={`w-full p-4 rounded-2xl border-2 text-left transition-all disabled:opacity-50 ${
                     selected === i
                       ? 'border-quest-sky bg-sky-50'
                       : 'border-gray-200 hover:border-gray-300'
@@ -243,13 +301,19 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
                 </button>
               ))}
             </div>
-            <button
-              onClick={submit}
-              disabled={selected == null || submitting}
-              className="btn-primary w-full disabled:opacity-50"
-            >
-              {submitting ? 'กำลังส่ง...' : 'ตอบ'}
-            </button>
+            {timeUp ? (
+              <div className="p-4 bg-orange-50 text-orange-600 rounded-2xl text-center font-medium">
+                ⏰ หมดเวลาแล้ว — รอครูไปข้อต่อไป
+              </div>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={selected == null || submitting}
+                className="btn-primary w-full disabled:opacity-50"
+              >
+                {submitting ? 'กำลังส่ง...' : 'ตอบ'}
+              </button>
+            )}
           </>
         ) : (
           <div className="text-center space-y-3">

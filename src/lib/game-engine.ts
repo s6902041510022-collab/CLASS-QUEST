@@ -235,8 +235,13 @@ export class GameEngine {
       gameId,
       status: 'active',
       currentMissionIndex: 0,
+      currentQuestionIndex: 0,
       bossHp: game.bossHp,
       startedAt: new Date(),
+      timeLimit: 0,
+      timeLeft: 0,
+      timeRunning: false,
+      timeDeadline: null,
     };
 
     this.sessions.set(gameId, session);

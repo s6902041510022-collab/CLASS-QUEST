@@ -536,6 +536,84 @@ export const getSessions = async (gameId: string) =>
 
 // ==================== SESSIONS (รอบการเล่น) ====================
 
+// ---------- จับเวลา (ครูควบคุมได้ระหว่างเล่น) ----------
+// เก็บเป็น "เวลาสิ้นสุด" (timeDeadline = epoch ms) เวลาที่เหลือจึงคิดจากนาฬิกาเซิร์ฟเวอร์
+// นักเรียนทุกคนจึงเห็นเวลาเท่ากัน แม้นาฬิกาเครื่องต่างกัน
+
+/** เวลาสูงสุด 1 ชั่วโมง — กันครูกดผิดจนเวลาบ้านปลาย */
+const TIME_MAX = 3600;
+
+/** เวลาที่เหลือจริงเป็นวินาที (0 = ไม่จับเวลา) */
+export function liveTimeLeft(session: any): number {
+  const total = Number(session?.timeLimit) || 0;
+  if (total <= 0) return 0;
+  if (session?.timeRunning && session?.timeDeadline) {
+    return Math.max(0, Math.ceil((Number(session.timeDeadline) - Date.now()) / 1000));
+  }
+  return Math.max(0, Number(session?.timeLeft) || 0);
+}
+
+const clampTime = (v: any) => Math.max(0, Math.min(TIME_MAX, Math.round(Number(v) || 0)));
+
+/** สั่งจับเวลา — คำนวณทั้งหมดบนเซิร์ฟเวอร์ ครูกดปุ่มเดียวจบ ไม่ต้องเดานาฬิกา */
+function applyTimeAction(s: any, action: string, seconds: any) {
+  const now = Date.now();
+  const left = liveTimeLeft(s);
+  const running = Boolean(s.timeRunning);
+
+  if (action === 'off') {
+    Object.assign(s, { timeLimit: 0, timeLeft: 0, timeRunning: false, timeDeadline: null });
+    return;
+  }
+  if (action === 'start') {
+    if ((Number(s.timeLimit) || 0) <= 0) return; // ยังไม่ได้ตั้งเวลา
+    Object.assign(s, { timeLeft: left, timeRunning: true, timeDeadline: now + left * 1000 });
+    return;
+  }
+  if (action === 'pause') {
+    Object.assign(s, { timeLeft: left, timeRunning: false, timeDeadline: null });
+    return;
+  }
+  if (action === 'add' || action === 'sub') {
+    const delta = clampTime(seconds) * (action === 'add' ? 1 : -1);
+    const next = clampTime(left + delta);
+    // กำลังนับอยู่ -> เลื่อนเวลาสิ้นสุด, หยุดอยู่ -> เก็บเป็นเวลาที่เหลือ
+    Object.assign(s, { timeLeft: next, timeDeadline: running ? now + next * 1000 : null });
+    return;
+  }
+  if (action === 'set') {
+    // "ตั้งเวลา" = ตั้งแล้วเริ่มนับทันที (ถ้าต้องการหยุด ครูกดปุ่มหยุดเอง)
+    const next = clampTime(seconds);
+    Object.assign(s, {
+      timeLimit: next,
+      timeLeft: next,
+      timeRunning: next > 0,
+      timeDeadline: next > 0 ? now + next * 1000 : null,
+    });
+  }
+}
+
+/** เปลี่ยนคำถาม -> ตั้งเวลาใหม่ตามที่ครูกำหนดไว้ใน Mission (0 = ไม่จับเวลา) */
+function resetTimerForQuestion(s: any, mission: any) {
+  const limit = clampTime(mission?.timeLimit);
+  const run = limit > 0 && s.status === 'question';
+  Object.assign(s, {
+    timeLimit: limit,
+    timeLeft: limit,
+    timeRunning: run,
+    timeDeadline: run ? Date.now() + limit * 1000 : null,
+    timePausedByGame: false,
+  });
+}
+
+function currentSessionIndex(sessions: any[], gameId: string) {
+  const mine = sessions.filter((s: any) => s.gameId === gameId);
+  if (mine.length === 0) return -1;
+  const active = mine.filter((s: any) => s.status !== 'completed');
+  const target = active.length > 0 ? active[active.length - 1] : mine[mine.length - 1];
+  return sessions.findIndex((s: any) => s.id === target.id);
+}
+
 /**
  * เปิดรอบการเล่น
  * - ครูสั่ง `force: true` เมื่อกดเริ่มใหม่ (ล้างผู้เล่นเก่าออก)
@@ -568,6 +646,11 @@ export async function createSession(gameId: string, options: { force?: boolean }
     bossHp: game?.bossHp || 1000,
     startedAt: null,
     endedAt: null,
+    timeLimit: 0,
+    timeLeft: 0,
+    timeRunning: false,
+    timeDeadline: null,
+    timePausedByGame: false,
   };
   const dup = db.data.sessions.find((s: any) => s.id === session.id);
   if (dup) return dup; // มีอยู่แล้ว (เพิ่งถูกสร้างจากคำขอพร้อมกัน)
@@ -577,22 +660,69 @@ export async function createSession(gameId: string, options: { force?: boolean }
 }
 
 export async function getSession(gameId: string) {
-  const list = (await getDb()).data.sessions.filter((s: any) => s.gameId === gameId);
-  if (list.length === 0) return undefined;
-  const active = list.filter((s: any) => s.status !== 'completed');
-  return active.length > 0 ? active[active.length - 1] : list[list.length - 1];
+  const db = await getDb();
+  const i = currentSessionIndex(db.data.sessions, gameId);
+  if (i === -1) return undefined;
+  const session = db.data.sessions[i];
+  return { ...session, timeLeft: liveTimeLeft(session) };
 }
 
-export async function updateSession(gameId: string, updates: any) {
+/**
+ * อัปเดตห้องเล่น + จัดการนาฬิกา
+ * - ครูเลื่อน/ย้อน/เริ่มคำถาม -> ตั้งเวลาใหม่ตาม Mission
+ * - เกมหยุด/เข้า BOSS/จบ -> นาฬิกาหยุดตาม
+ * - timeAction: start | pause | add | sub | set | off (ครูกดปุ่มจับเวลา)
+ */
+export async function updateSessionLive(gameId: string, updates: any) {
+  const { timeAction, timeSeconds, ...rest } = updates || {};
   const db = await getDb();
-  const list = db.data.sessions.filter((s: any) => s.gameId === gameId);
-  if (list.length === 0) return null;
-  const current =
-    list.filter((s: any) => s.status !== 'completed').slice(-1)[0] || list[list.length - 1];
-  const i = db.data.sessions.findIndex((s: any) => s.id === current.id);
-  db.data.sessions[i] = { ...db.data.sessions[i], ...updates };
+  const i = currentSessionIndex(db.data.sessions, gameId);
+  if (i === -1) return null;
+
+  const before = db.data.sessions[i];
+  const next: any = { ...before, ...rest };
+  const moved = rest.currentMissionIndex != null || rest.currentQuestionIndex != null;
+  const missionAt = (index: number) =>
+    db.data.missions
+      .filter((m: any) => m.gameId === gameId)
+      .sort((a: any, b: any) => a.order - b.order)[index];
+
+  if (moved) {
+    // ครูเลื่อน/ย้อนคำถาม -> เริ่มจับเวลาใหม่ตามเวลาที่ครูตั้งไว้ใน Mission
+    resetTimerForQuestion(next, missionAt(next.currentMissionIndex));
+  } else if (rest.status === 'question' && before.status === 'paused') {
+    // ครูกด "เล่นต่อ" -> นาฬิกาเดินต่อถ้าก่อนหน้านี้หยุดเพราะเกมพัก
+    // (ถ้าครูกดหยุดนาฬิกาเอง จะไม่ถูกมาเดินต่อเอง)
+    if (next.timePausedByGame) {
+      const left = liveTimeLeft(next);
+      Object.assign(next, {
+        timeLeft: left,
+        timeRunning: true,
+        timeDeadline: Date.now() + left * 1000,
+        timePausedByGame: false,
+      });
+    }
+  } else if (rest.status === 'question' && before.status !== 'question') {
+    // เริ่มเล่นคำถามใหม่ (จากห้องรอ/หลังบอส) -> จับเวลาใหม่
+    resetTimerForQuestion(next, missionAt(next.currentMissionIndex));
+  } else if (rest.status && rest.status !== 'question' && next.timeRunning) {
+    // เกมไม่ได้เล่นคำถาม (หยุด/บอส/จบ) -> นาฬิกาหยุดตาม
+    Object.assign(next, {
+      timeLeft: liveTimeLeft(next),
+      timeRunning: false,
+      timeDeadline: null,
+      timePausedByGame: rest.status === 'paused',
+    });
+  }
+
+  if (timeAction) {
+    next.timePausedByGame = false; // ครูสั่งเอง = คุมเต็มที่
+    applyTimeAction(next, timeAction, timeSeconds);
+  }
+
+  db.data.sessions[i] = next;
   await db.write();
-  return db.data.sessions[i];
+  return { ...next, timeLeft: liveTimeLeft(next) };
 }
 
 // ==================== TEACHER & SETTINGS ====================

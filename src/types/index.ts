@@ -71,11 +71,20 @@ export interface Team {
 export interface GameSession {
   id: string;
   gameId: string;
-  status: 'lobby' | 'active' | 'paused' | 'completed';
+  status: 'lobby' | 'active' | 'paused' | 'question' | 'boss' | 'completed';
   currentMissionIndex: number;
+  currentQuestionIndex: number;
   bossHp: number;
   startedAt?: Date;
   endedAt?: Date;
+  /** จับเวลาต่อคำถาม (วินาที) 0 = ไม่จับเวลา */
+  timeLimit: number;
+  /** เวลาที่เหลือตอนหยุดเวลา (วินาที) */
+  timeLeft: number;
+  timeRunning: boolean;
+  /** เวลาสิ้นสุดแบบ epoch ms — ใช้นับถอยหลังโดยไม่ต้องยิงเซิร์ฟเวอร์ */
+  timeDeadline: number | null;
+  timePausedByGame?: boolean;
 }
 
 export interface Achievement {

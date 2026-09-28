@@ -21,6 +21,7 @@ type Mission = {
   title: string;
   type: string;
   xp: number;
+  timeLimit: number;
   questions: Question[];
 };
 
@@ -44,7 +45,7 @@ const blankQuestion = (): Question => ({
   explanation: '',
 });
 
-const blankForm = () => ({ title: '', xp: 100, questions: [] as Question[] });
+const blankForm = () => ({ title: '', xp: 100, timeLimit: 60, questions: [] as Question[] });
 
 function MissionsBuilder() {
   const router = useRouter();
@@ -134,6 +135,7 @@ function MissionsBuilder() {
     setForm({
       title: mission.title || '',
       xp: mission.xp ?? 100,
+      timeLimit: mission.timeLimit ?? 60,
       questions: (mission.questions || []).map((q) => ({
         id: q.id || uid(),
         text: q.text || '',
@@ -211,6 +213,7 @@ function MissionsBuilder() {
           title: form.title,
           type: 'quiz',
           xp: Number(form.xp) || 100,
+          timeLimit: Math.max(0, Math.min(3600, Number(form.timeLimit) || 0)),
           questions: form.questions,
         }),
       });
@@ -338,7 +341,8 @@ function MissionsBuilder() {
                       <div className="min-w-0 flex-1">
                         <h3 className="font-medium truncate">{mission.title}</h3>
                         <p className="text-sm text-quest-text/60">
-                          {mission.xp} XP • {mission.questions?.length || 0} คำถาม • Quiz
+                          {mission.xp} XP • {mission.questions?.length || 0} คำถาม •{' '}
+                          {mission.timeLimit ? `⏱️ ${mission.timeLimit} วิ/ข้อ` : 'ไม่จับเวลา'}
                         </p>
                       </div>
                     </div>
@@ -407,6 +411,39 @@ function MissionsBuilder() {
                     className="input"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">⏱️ เวลาต่อคำถาม (วินาที)</label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="number"
+                    min={0}
+                    max={3600}
+                    value={form.timeLimit}
+                    onChange={(e) => setForm({ ...form, timeLimit: Number(e.target.value) })}
+                    className="input w-32"
+                  />
+                  <div className="flex gap-1.5 flex-wrap">
+                    {[30, 45, 60, 90].map((sec) => (
+                      <button
+                        key={sec}
+                        type="button"
+                        onClick={() => setForm({ ...form, timeLimit: sec })}
+                        className={`px-3 py-1.5 rounded-xl text-sm font-medium ${
+                          form.timeLimit === sec
+                            ? 'bg-quest-sky text-white'
+                            : 'bg-sky-50 text-sky-700 hover:bg-sky-100'
+                        }`}
+                      >
+                        {sec} วิ
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-xs text-quest-text/60 mt-2">
+                  ใส่ 0 = ไม่จับเวลา • ครูยังบวก/ลดเวลาได้ตอนเล่นจริงเสมอ
+                </p>
               </div>
 
               <div>

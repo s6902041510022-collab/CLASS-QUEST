@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createSession, getSession, updateSession, getPlayers, rollUp } from '@/lib/db';
+import { createSession, getSession, updateSessionLive, getPlayers, rollUp } from '@/lib/db';
 
 export async function GET(request: Request) {
   try {
@@ -33,7 +33,7 @@ export async function PUT(request: Request) {
     if (!gameId) {
       return NextResponse.json({ success: false, error: 'gameId is required' }, { status: 400 });
     }
-    const session = await updateSession(gameId, updates);
+    const session = await updateSessionLive(gameId, updates);
     if (!session) {
       return NextResponse.json({ success: false, error: 'ยังไม่มีห้องเล่น' }, { status: 404 });
     }

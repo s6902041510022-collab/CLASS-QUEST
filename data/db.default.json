@@ -29,6 +29,7 @@
       "title": "ด่านที่ 1: หน่วยความจำ",
       "type": "quiz",
       "xp": 100,
+      "timeLimit": 60,
       "order": 1,
       "questions": [
         {
@@ -67,6 +68,7 @@
       "title": "ด่านที่ 2: ด่านมอนเตอร์",
       "type": "quiz",
       "xp": 150,
+      "timeLimit": 45,
       "order": 2,
       "questions": [
         {

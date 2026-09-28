@@ -19,6 +19,41 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [timeInput, setTimeInput] = useState(60);
+
+  // ---------- จับเวลา ----------
+  // นับถอยหลังบนเครื่องครูเอง โดยยึด "เวลาสิ้นสุด" ที่เซิร์ฟเวอร์ส่งมา
+  // จึงไม่ต้องยิงเซิร์ฟเวอร์ทุกวินาที และตรงกับที่นักเรียนเห็นเสมอ
+  const [now, setNow] = useState(() => Date.now());
+  const [deadline, setDeadline] = useState<number | null>(null);
+
+  useEffect(() => {
+    setDeadline(
+      session?.timeRunning && session?.timeDeadline ? Number(session.timeDeadline) : null
+    );
+  }, [session?.timeRunning, session?.timeDeadline, session?.id]);
+
+  useEffect(() => {
+    if (deadline == null) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [deadline]);
+
+  const timeLimit = Number(session?.timeLimit) || 0;
+  const timeRunning = Boolean(session?.timeRunning);
+  const timeLeft = timeLimit
+    ? deadline != null
+      ? Math.max(0, Math.ceil((deadline - now) / 1000))
+      : Math.max(0, Number(session?.timeLeft) || 0)
+    : 0;
+  const timePct = timeLimit > 0 ? Math.max(0, Math.min(100, (timeLeft / timeLimit) * 100)) : 0;
+  const timeColor = timeLeft <= 0 ? 'bg-primary-500' : timeLeft <= 10 ? 'bg-warm-400' : 'bg-accent-400';
+  const mmss = (sec: number) =>
+    `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+
+  const setTime = (timeAction: string, timeSeconds?: number) =>
+    updateSession({ timeAction, ...(timeSeconds != null ? { timeSeconds } : {}) });
 
   const status = session?.status || 'lobby';
   const missionIndex = session?.currentMissionIndex ?? 0;
@@ -324,8 +359,16 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                   <p className="text-xs text-quest-text/60">ตอบแล้ว</p>
                 </div>
                 <div className="text-center p-4 bg-gray-50 rounded-2xl">
-                  <p className="text-2xl font-bold">{Math.round((game.timeLimit || 300) / 60)}</p>
-                  <p className="text-xs text-quest-text/60">นาที</p>
+                  <p
+                    className={`text-2xl font-bold tabular-nums ${
+                      timeLimit && timeLeft <= 10 ? 'text-warm-500' : ''
+                    }`}
+                  >
+                    {timeLimit ? mmss(timeLeft) : '—'}
+                  </p>
+                  <p className="text-xs text-quest-text/60">
+                    {timeLimit ? (timeRunning ? 'นับถอยหลัง' : 'หยุดเวลา') : 'ไม่จับเวลา'}
+                  </p>
                 </div>
               </div>
 
@@ -452,6 +495,138 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                     </>
                   ) : null}
                 </div>
+              )}
+            </div>
+
+            {/* จับเวลา */}
+            <div className="card p-6">
+              <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                <h2 className="text-lg font-bold">⏱️ จับเวลา</h2>
+                <span className="text-xs text-quest-text/60">
+                  Mission นี้ตั้งไว้{' '}
+                  {mission?.timeLimit ? `${mission.timeLimit} วินาที` : 'ไม่จับเวลา'}
+                </span>
+              </div>
+
+              {timeLimit <= 0 ? (
+                <>
+                  <p className="text-quest-text/60 text-sm mb-3">
+                    ตอนนี้ไม่จับเวลา — กดเพื่อเริ่มจับเวลาในข้อนี้
+                  </p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[30, 60, 90, 120].map((sec) => (
+                      <button
+                        key={sec}
+                        onClick={() => setTime('set', sec)}
+                        disabled={busy}
+                        className="p-3 rounded-2xl bg-quest-sky text-white font-medium hover:opacity-90 disabled:opacity-50"
+                      >
+                        {sec} วิ
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="flex-1 text-center p-4 bg-gray-50 rounded-2xl">
+                      <p
+                        className={`text-5xl font-bold tabular-nums ${
+                          timeLeft <= 10 ? 'text-warm-500' : ''
+                        }`}
+                      >
+                        {mmss(timeLeft)}
+                      </p>
+                      <p className="text-xs text-quest-text/60 mt-1">
+                        {timeRunning ? '⏳ กำลังนับถอยหลัง' : '⏸️ หยุดอยู่'}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 shrink-0">
+                      <button
+                        onClick={() => setTime(timeRunning ? 'pause' : 'start')}
+                        disabled={busy || (timeLeft <= 0 && !timeRunning)}
+                        className={`px-4 py-3 rounded-2xl font-medium disabled:opacity-50 ${
+                          timeRunning
+                            ? 'bg-warm-100 text-warm-700 hover:bg-warm-200'
+                            : 'bg-accent-500 text-white hover:bg-accent-600'
+                        }`}
+                      >
+                        {timeRunning ? '⏸️ หยุด' : '▶️ เล่น'}
+                      </button>
+                      <button
+                        onClick={() => setTime('set', timeLimit)}
+                        disabled={busy}
+                        className="px-4 py-3 rounded-2xl bg-gray-100 hover:bg-gray-200 font-medium disabled:opacity-50"
+                      >
+                        🔄 รีเซ็ต
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden mb-4">
+                    <div
+                      className={`h-full rounded-full transition-[width] duration-300 ${timeColor}`}
+                      style={{ width: `${timePct}%` }}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 mb-3">
+                    <button
+                      onClick={() => setTime('sub', 30)}
+                      disabled={busy}
+                      className="p-3 rounded-2xl bg-warm-100 text-warm-700 hover:bg-warm-200 font-medium disabled:opacity-50"
+                    >
+                      −30 วิ
+                    </button>
+                    <button
+                      onClick={() => setTime('add', 30)}
+                      disabled={busy}
+                      className="p-3 rounded-2xl bg-accent-100 text-accent-700 hover:bg-accent-200 font-medium disabled:opacity-50"
+                    >
+                      +30 วิ
+                    </button>
+                    <button
+                      onClick={() => setTime('sub', 60)}
+                      disabled={busy}
+                      className="p-3 rounded-2xl bg-warm-100 text-warm-700 hover:bg-warm-200 font-medium disabled:opacity-50"
+                    >
+                      −1 นาที
+                    </button>
+                    <button
+                      onClick={() => setTime('add', 60)}
+                      disabled={busy}
+                      className="p-3 rounded-2xl bg-accent-100 text-accent-700 hover:bg-accent-200 font-medium disabled:opacity-50"
+                    >
+                      +1 นาที
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={3600}
+                      value={timeInput}
+                      onChange={(e) => setTimeInput(Number(e.target.value))}
+                      className="input flex-1"
+                      placeholder="วินาที"
+                    />
+                    <button
+                      onClick={() => setTime('set', timeInput)}
+                      disabled={busy}
+                      className="btn-primary shrink-0 disabled:opacity-50"
+                    >
+                      ตั้งเวลา
+                    </button>
+                    <button
+                      onClick={() => setTime('off')}
+                      disabled={busy}
+                      className="px-3 py-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-sm font-medium shrink-0 disabled:opacity-50"
+                    >
+                      ปิด
+                    </button>
+                  </div>
+                </>
               )}
             </div>
 
