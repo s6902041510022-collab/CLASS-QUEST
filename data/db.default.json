@@ -1,0 +1,102 @@
+{
+  "games": [
+    {
+      "id": "demo-game-1",
+      "name": "จักรวาลแห่งข้อมูล",
+      "subject": "วิทยาการคอมพิวเตอร์",
+      "topic": "หน่วยความจำและการจัดเก็บข้อมูล",
+      "description": "เกมตัวอย่างสำหรับทดสอบระบบ ครูสามารถแก้ไขหรือลบได้ตลอด",
+      "mode": "solo",
+      "teamCount": 2,
+      "timeLimit": 300,
+      "playerLimit": 40,
+      "randomEvents": false,
+      "actionCards": false,
+      "bossBattle": true,
+      "leaderboard": true,
+      "bossName": "มอนเตอร์ไบต์",
+      "bossHp": 500,
+      "status": "draft",
+      "roomCode": "QUEST1",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "missions": [
+    {
+      "id": "demo-mission-1",
+      "gameId": "demo-game-1",
+      "title": "ด่านที่ 1: หน่วยความจำ",
+      "type": "quiz",
+      "xp": 100,
+      "order": 1,
+      "questions": [
+        {
+          "id": "demo-q-1",
+          "text": "หน่วยความจำใดเร็วที่สุด?",
+          "options": ["Register", "Cache", "RAM", "SSD"],
+          "correctAnswer": 0,
+          "explanation": "Register อยู่ภายใน CPU จึงเข้าถึงได้เร็วที่สุด"
+        },
+        {
+          "id": "demo-q-2",
+          "text": "Cache มีหน้าที่อะไร?",
+          "options": [
+            "เก็บข้อมูลที่ถูกเรียกใช้บ่อยชั่วคราว",
+            "เก็บข้อมูลถาวรตลอดอายุเครื่อง",
+            "แสดงผลภาพบนจอ",
+            "เชื่อมต่ออินเทอร์เน็ต"
+          ],
+          "correctAnswer": 0,
+          "explanation": "Cache เป็นหน่วยความจำชั่วคราวที่เก็บข้อมูลที่ CPU ใช้บ่อย เพื่อให้เข้าถึงได้เร็ว"
+        },
+        {
+          "id": "demo-q-3",
+          "text": "ข้อมูลใดอยู่ได้นานที่สุดเมื่อไฟดับ?",
+          "options": ["Register", "Cache", "RAM", "Hard Disk"],
+          "correctAnswer": 3,
+          "explanation": "Hard Disk เก็บข้อมูลถาวร ส่วน Register, Cache และ RAM เป็นหน่วยความจำชั่วคราว"
+        }
+      ],
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "demo-mission-2",
+      "gameId": "demo-game-1",
+      "title": "ด่านที่ 2: ด่านมอนเตอร์",
+      "type": "quiz",
+      "xp": 150,
+      "order": 2,
+      "questions": [
+        {
+          "id": "demo-q-4",
+          "text": "ไฟล์ที่อยู่บน Hard Disk เรียกว่าอะไร?",
+          "options": ["Secondary Storage", "Primary Storage", "Cache Memory", "Main Memory"],
+          "correctAnswer": 0,
+          "explanation": "Secondary Storage คือพื้นที่จัดเก็บถาวร เช่น Hard Disk และ SSD"
+        },
+        {
+          "id": "demo-q-5",
+          "text": "ข้อใดไม่ใช่หน่วยความจำหลัก (RAM)?",
+          "options": ["SSD", "RAM", "Cache", "Register"],
+          "correctAnswer": 0,
+          "explanation": "SSD เป็นพื้นที่จัดเก็บถาวร ไม่ใช่ RAM"
+        }
+      ],
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "students": [
+    { "id": "demo-s-1", "name": "เด็กชายสมชาย", "totalXp": 0, "gamesPlayed": 0, "correctAnswers": 0, "totalAnswers": 0, "completedSessions": [] },
+    { "id": "demo-s-2", "name": "เด็กหญิงสุดา", "totalXp": 0, "gamesPlayed": 0, "correctAnswers": 0, "totalAnswers": 0, "completedSessions": [] },
+    { "id": "demo-s-3", "name": "เด็กหญิงมณี", "totalXp": 0, "gamesPlayed": 0, "correctAnswers": 0, "totalAnswers": 0, "completedSessions": [] },
+    { "id": "demo-s-4", "name": "เด็กชายประยุทธ", "totalXp": 0, "gamesPlayed": 0, "correctAnswers": 0, "totalAnswers": 0, "completedSessions": [] }
+  ],
+  "players": [],
+  "sessions": [],
+  "teams": [],
+  "teachers": [],
+  "settings": { "teacherPin": "1234", "teacherName": "" }
+}

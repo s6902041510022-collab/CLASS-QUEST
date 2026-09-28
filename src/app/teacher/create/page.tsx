@@ -2,8 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { MASCOT } from '@/lib/utils';
+import TeacherHeader from '@/components/TeacherHeader';
 
 const STEPS = ['Game Info', 'Game Mode', 'Settings', 'Review'];
 
@@ -33,7 +32,14 @@ export default function CreateGamePage() {
     setFormData(prev => ({ ...prev, [key]: value }));
   };
 
-  const nextStep = () => setStep(prev => Math.min(prev + 1, STEPS.length - 1));
+  const nextStep = () => {
+    if (step === 0 && !formData.name.trim()) {
+      setError('กรอกชื่อเกมก่อนครับ');
+      return;
+    }
+    setError('');
+    setStep(prev => Math.min(prev + 1, STEPS.length - 1));
+  };
   const prevStep = () => setStep(prev => Math.max(prev - 1, 0));
 
   const handleCreateGame = async () => {
@@ -50,12 +56,12 @@ export default function CreateGamePage() {
       const result = await response.json();
       
       if (result.success) {
-        router.push(`/teacher/game/${result.data.id}`);
+        router.push(`/teacher/missions?gameId=${result.data.id}`);
       } else {
-        setError(result.error || 'Failed to create game');
+        setError(result.error || 'สร้างเกมไม่สำเร็จ');
       }
     } catch (err) {
-      setError('Network error. Please try again.');
+      setError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง');
     } finally {
       setLoading(false);
     }
@@ -63,25 +69,7 @@ export default function CreateGamePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-100">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-quest-text/60 hover:text-quest-sky"
-            >
-              <span>←</span>
-              <span>กลับ</span>
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">{MASCOT.emoji}</span>
-              <span className="font-bold">Create Game</span>
-            </div>
-            <div className="w-16"></div>
-          </div>
-        </div>
-      </header>
+      <TeacherHeader title="สร้างเกมใหม่" subtitle={`ขั้นตอนที่ ${step + 1} จาก ${STEPS.length}`} backHref="/teacher/games" />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Progress Steps */}
@@ -348,18 +336,13 @@ export default function CreateGamePage() {
                 ถัดไป →
               </button>
             ) : (
-              <div className="flex gap-3">
-                <button className="btn-secondary" disabled>
-                  บันทึกฉบับร่าง
-                </button>
-                <button
-                  onClick={handleCreateGame}
-                  disabled={loading}
-                  className="btn-primary disabled:opacity-50"
-                >
-                  {loading ? 'กำลังสร้าง...' : 'สร้างเกม'}
-                </button>
-              </div>
+              <button
+                onClick={handleCreateGame}
+                disabled={loading}
+                className="btn-primary disabled:opacity-50"
+              >
+                {loading ? 'กำลังสร้าง...' : 'สร้างเกมและไปใส่คำถาม →'}
+              </button>
             )}
           </div>
         </div>

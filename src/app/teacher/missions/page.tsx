@@ -1,427 +1,559 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
-import { MASCOT } from '@/lib/utils';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { isTeacherLoggedIn } from '@/lib/auth';
+import TeacherHeader from '@/components/TeacherHeader';
 
-interface Mission {
-  id: string;
-  order: number;
-  title: string;
-  type: string;
-  xp: number;
-  questions: any[];
-}
-
-interface Question {
+type Question = {
   id: string;
   text: string;
   options: string[];
   correctAnswer: number;
   explanation?: string;
-}
+};
 
-export default function MissionBuilderPage() {
+type Mission = {
+  id: string;
+  gameId?: string;
+  order: number;
+  title: string;
+  type: string;
+  xp: number;
+  questions: Question[];
+};
+
+type Game = {
+  id: string;
+  name: string;
+  subject?: string;
+  topic?: string;
+};
+
+const uid = () =>
+  typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+const blankQuestion = (): Question => ({
+  id: uid(),
+  text: '',
+  options: ['', '', '', ''],
+  correctAnswer: 0,
+  explanation: '',
+});
+
+const blankForm = () => ({ title: '', xp: 100, questions: [] as Question[] });
+
+function MissionsBuilder() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const queryGameId = searchParams.get('gameId');
+
+  const [games, setGames] = useState<Game[]>([]);
+  const [gameId, setGameId] = useState(queryGameId || '');
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [editingMission, setEditingMission] = useState<Mission | null>(null);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // New mission form
-  const [newMission, setNewMission] = useState({
-    title: '',
-    type: 'quiz',
-    xp: 100,
-    questions: [] as Question[],
-  });
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState(blankForm);
+  const [saving, setSaving] = useState(false);
 
-  // New question form
-  const [newQuestion, setNewQuestion] = useState({
-    text: '',
-    options: ['', '', '', ''],
-    correctAnswer: 0,
-    explanation: '',
-  });
-
-  const gameId = '902d8aee-b7d9-42f0-b892-a8b11c5e56b7'; // Demo game ID
+  // โหลดรายชื่อเกม + เลือกเกมแรกถ้ายังไม่ได้เลือก
+  useEffect(() => {
+    (async () => {
+      try {
+        const response = await fetch('/api/games');
+        const result = await response.json();
+        if (!result.success) return;
+        const list: Game[] = result.data || [];
+        setGames(list);
+        if (!queryGameId && list.length > 0) {
+          setGameId(list[0].id);
+          router.replace(`/teacher/missions?gameId=${list[0].id}`);
+        }
+      } catch {
+        setError('โหลดรายชื่อเกมไม่สำเร็จ');
+      }
+    })();
+  }, [queryGameId, router]);
 
   useEffect(() => {
-    fetchMissions();
-  }, []);
+    if (queryGameId) setGameId(queryGameId);
+  }, [queryGameId]);
 
-  const fetchMissions = async () => {
+  // โหลด mission ของเกมที่เลือก
+  const loadMissions = useCallback(async (id: string) => {
+    if (!id) {
+      setMissions([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     try {
-      const response = await fetch(`/api/missions?gameId=${gameId}`);
+      const response = await fetch(`/api/missions?gameId=${id}`);
       const result = await response.json();
-      if (result.success) {
-        setMissions(result.data);
-      }
-    } catch (err) {
-      console.error('Failed to fetch missions:', err);
+      if (result.success) setMissions(result.data || []);
+      else setError('โหลดคำถามไม่สำเร็จ');
+    } catch {
+      setError('โหลดคำถามไม่สำเร็จ');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const addQuestion = () => {
-    if (!newQuestion.text || newQuestion.options.some(o => !o)) {
-      setError('กรุณากรอกคำถามและตัวเลือกให้ครบ');
+  useEffect(() => {
+    if (!isTeacherLoggedIn()) {
+      router.replace('/teacher/login');
       return;
     }
-    const question: Question = {
-      id: Date.now().toString(),
-      ...newQuestion,
-    };
-    setNewMission(prev => ({
-      ...prev,
-      questions: [...prev.questions, question],
-    }));
-    setNewQuestion({
-      text: '',
-      options: ['', '', '', ''],
-      correctAnswer: 0,
-      explanation: '',
+    loadMissions(gameId);
+  }, [router, gameId, loadMissions]);
+
+  const currentGame = games.find((g) => g.id === gameId);
+
+  const switchGame = (id: string) => {
+    setGameId(id);
+    setError('');
+    router.replace(`/teacher/missions?gameId=${id}`);
+  };
+
+  // ---------- ฟอร์ม ----------
+  const openCreate = () => {
+    setEditingId(null);
+    setForm(blankForm());
+    setError('');
+    setModalOpen(true);
+  };
+
+  const openEdit = (mission: Mission) => {
+    setEditingId(mission.id);
+    setForm({
+      title: mission.title || '',
+      xp: mission.xp ?? 100,
+      questions: (mission.questions || []).map((q) => ({
+        id: q.id || uid(),
+        text: q.text || '',
+        options: Array.isArray(q.options) && q.options.length === 4 ? q.options : ['', '', '', ''],
+        correctAnswer: typeof q.correctAnswer === 'number' ? q.correctAnswer : 0,
+        explanation: q.explanation || '',
+      })),
     });
     setError('');
+    setModalOpen(true);
+  };
+
+  const setQuestion = (id: string, patch: Partial<Question>) => {
+    setForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) => (q.id === id ? { ...q, ...patch } : q)),
+    }));
+  };
+
+  const setOption = (questionId: string, index: number, value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) => {
+        if (q.id !== questionId) return q;
+        const options = [...q.options];
+        options[index] = value;
+        return { ...q, options };
+      }),
+    }));
   };
 
   const removeQuestion = (id: string) => {
-    setNewMission(prev => ({
+    setForm((prev) => ({
       ...prev,
-      questions: prev.questions.filter(q => q.id !== id),
+      questions: prev.questions.filter((q) => q.id !== id),
     }));
   };
 
-  const handleSaveMission = async () => {
-    if (!newMission.title) {
-      setError('กรุณากรอกชื่อ Mission');
+  const moveQuestion = (index: number, direction: -1 | 1) => {
+    setForm((prev) => {
+      const target = index + direction;
+      if (target < 0 || target >= prev.questions.length) return prev;
+      const questions = [...prev.questions];
+      [questions[index], questions[target]] = [questions[target], questions[index]];
+      return { ...prev, questions };
+    });
+  };
+
+  const save = async () => {
+    if (!form.title.trim()) {
+      setError('กรอกชื่อ Mission');
       return;
     }
-    if (newMission.questions.length === 0) {
-      setError('กรุณาเพิ่มคำถามอย่างน้อย 1 ข้อ');
+    if (form.questions.length === 0) {
+      setError('เพิ่มคำถามอย่างน้อย 1 ข้อ');
+      return;
+    }
+    const incomplete = form.questions.some(
+      (q) => !q.text.trim() || q.options.some((o) => !o.trim())
+    );
+    if (incomplete) {
+      setError('กรอกคำถามและตัวเลือกให้ครบทุกช่อง');
       return;
     }
 
     setSaving(true);
     setError('');
-
     try {
-      const response = await fetch('/api/missions', {
-        method: 'POST',
+      const url = editingId ? `/api/missions/${editingId}` : '/api/missions';
+      const response = await fetch(url, {
+        method: editingId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           gameId,
-          title: newMission.title,
-          type: newMission.type,
-          xp: newMission.xp,
-          questions: newMission.questions,
+          title: form.title,
+          type: 'quiz',
+          xp: Number(form.xp) || 100,
+          questions: form.questions,
         }),
       });
-
       const result = await response.json();
-
       if (result.success) {
-        setShowAddModal(false);
-        setNewMission({
-          title: '',
-          type: 'quiz',
-          xp: 100,
-          questions: [],
-        });
-        fetchMissions();
+        setModalOpen(false);
+        setForm(blankForm());
+        setEditingId(null);
+        loadMissions(gameId);
       } else {
-        setError(result.error || 'Failed to save mission');
+        setError(result.error || 'บันทึกไม่สำเร็จ');
       }
-    } catch (err) {
-      setError('Network error. Please try again.');
+    } catch {
+      setError('บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง');
     } finally {
       setSaving(false);
     }
   };
 
-  const deleteMission = async (id: string) => {
-    if (!confirm('ต้องการลบ Mission นี้?')) return;
-
+  const deleteMission = async (mission: Mission) => {
+    if (!confirm(`ต้องการลบ Mission "${mission.title}" หรือไม่?`)) return;
     try {
-      const response = await fetch(`/api/missions/${id}`, {
-        method: 'DELETE',
-      });
+      const response = await fetch(`/api/missions/${mission.id}`, { method: 'DELETE' });
       const result = await response.json();
-      if (result.success) {
-        fetchMissions();
-      }
-    } catch (err) {
-      console.error('Failed to delete mission:', err);
+      if (result.success) loadMissions(gameId);
+      else setError(result.error || 'ลบไม่สำเร็จ');
+    } catch {
+      setError('ลบไม่สำเร็จ ลองใหม่อีกครั้ง');
     }
   };
 
-  const missionTypes = [
-    { value: 'quiz', label: 'Quiz', icon: '❓' },
-    { value: 'matching', label: 'Matching', icon: '🧩' },
-    { value: 'sorting', label: 'Sorting', icon: '📊' },
-    { value: 'drag-drop', label: 'Drag & Drop', icon: '🖱️' },
-    { value: 'scenario', label: 'Scenario', icon: '📖' },
-    { value: 'decision', label: 'Decision', icon: '🤔' },
-    { value: 'speed', label: 'Speed Challenge', icon: '⚡' },
-    { value: 'memory', label: 'Memory', icon: '🧠' },
-    { value: 'team', label: 'Team Challenge', icon: '👥' },
-  ];
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-6xl mb-4 animate-bounce">{MASCOT.emoji}</div>
-          <p className="text-quest-text/60">กำลังโหลด...</p>
-        </div>
-      </div>
-    );
-  }
+  const moveMission = async (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= missions.length) return;
+    const reordered = [...missions];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    setMissions(reordered);
+    try {
+      await Promise.all(
+        reordered.map((m, i) =>
+          fetch(`/api/missions/${m.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order: i + 1 }),
+          })
+        )
+      );
+      loadMissions(gameId);
+    } catch {
+      setError('จัดลำดับไม่สำเร็จ');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-100">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-quest-text/60 hover:text-quest-sky"
-            >
-              <span>←</span>
-              <span>กลับ</span>
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">{MASCOT.emoji}</span>
-              <span className="font-bold">Mission Builder</span>
-            </div>
-            <button
-              onClick={handleSaveMission}
-              disabled={saving}
-              className="btn-primary text-sm disabled:opacity-50"
-            >
-              {saving ? 'กำลังบันทึก...' : 'บันทึก'}
-            </button>
-          </div>
-        </div>
-      </header>
+      <TeacherHeader
+        title="จัดการคำถาม"
+        subtitle={currentGame ? currentGame.name : 'ยังไม่ได้เลือกเกม'}
+        backHref="/teacher/games"
+      />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Game Info */}
-        <div className="card p-6 mb-6">
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-quest-sky to-quest-lavender flex items-center justify-center text-3xl">
-              🎮
-            </div>
-            <div>
-              <h1 className="text-xl font-bold">Memory Adventure</h1>
-              <p className="text-quest-text/60">Computer Science • Memory Hierarchy</p>
-            </div>
+        {games.length === 0 ? (
+          <div className="card p-12 text-center">
+            <div className="text-5xl mb-4">🎮</div>
+            <h3 className="text-xl font-bold mb-1">ยังไม่มีเกม</h3>
+            <p className="text-quest-text/60 mb-6">สร้างเกมก่อน แล้วค่อยเพิ่มคำถาม</p>
+            <Link href="/teacher/create" className="btn-primary">
+              + สร้างเกม
+            </Link>
           </div>
-        </div>
-
-        {/* Missions List */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold">Missions ({missions.length})</h2>
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="btn-primary text-sm"
-            >
-              + เพิ่ม Mission
-            </button>
-          </div>
-
-          {missions.length === 0 ? (
-            <div className="card p-12 text-center">
-              <div className="text-6xl mb-4">📝</div>
-              <h3 className="text-xl font-bold mb-2">ยังไม่มี Mission</h3>
-              <p className="text-quest-text/60 mb-6">เริ่มสร้าง Mission แรกของคุณ</p>
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="btn-primary"
+        ) : (
+          <>
+            <div className="card p-5 mb-6">
+              <label className="block text-sm font-medium mb-2">เกม</label>
+              <select
+                value={gameId}
+                onChange={(e) => switchGame(e.target.value)}
+                className="input"
               >
-                + เพิ่ม Mission แรก
+                {games.map((game) => (
+                  <option key={game.id} value={game.id}>
+                    {game.name || 'ไม่มีชื่อ'}
+                  </option>
+                ))}
+              </select>
+              {currentGame ? (
+                <p className="text-sm text-quest-text/60 mt-2">
+                  {currentGame.subject || 'ไม่ระบุวิชา'}
+                  {currentGame.topic ? ` • ${currentGame.topic}` : ''}
+                </p>
+              ) : null}
+            </div>
+
+            {error && (
+              <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-2xl">{error}</div>
+            )}
+
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h2 className="text-lg font-bold">Mission ({missions.length})</h2>
+              <button onClick={openCreate} className="btn-primary text-sm shrink-0">
+                + เพิ่ม Mission
               </button>
             </div>
-          ) : (
-            missions.map((mission, index) => (
-              <div key={mission.id} className="card p-4 flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-quest-sky to-quest-lavender flex items-center justify-center font-bold text-white">
-                  {index + 1}
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-medium">{mission.title}</h3>
-                  <div className="flex items-center gap-3 text-sm text-quest-text/60">
-                    <span>{mission.type}</span>
-                    <span>•</span>
-                    <span>{mission.xp} XP</span>
-                    <span>•</span>
-                    <span>{mission.questions?.length || 0} คำถาม</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setEditingMission(mission)}
-                    className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={() => deleteMission(mission.id)}
-                    className="p-2 hover:bg-red-50 rounded-xl transition-colors text-red-500"
-                  >
-                    🗑️
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
 
-        {/* Add Mission Modal */}
-        {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 overflow-y-auto">
-            <div className="card w-full max-w-2xl p-6 my-8">
-              <h3 className="text-xl font-bold mb-4">เพิ่ม Mission</h3>
-              
-              <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-                <div>
+            {loading ? (
+              <p className="text-center py-12 text-quest-text/60">กำลังโหลด...</p>
+            ) : missions.length === 0 ? (
+              <div className="card p-12 text-center">
+                <div className="text-5xl mb-4">📝</div>
+                <h3 className="text-xl font-bold mb-1">ยังไม่มี Mission</h3>
+                <p className="text-quest-text/60 mb-6">เพิ่ม Mission และคำถามแรกของคุณ</p>
+                <button onClick={openCreate} className="btn-primary">
+                  + เพิ่ม Mission แรก
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {missions.map((mission, index) => (
+                  <div key={mission.id} className="card p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-quest-sky to-quest-lavender flex items-center justify-center font-bold text-white shrink-0">
+                        {index + 1}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-medium truncate">{mission.title}</h3>
+                        <p className="text-sm text-quest-text/60">
+                          {mission.xp} XP • {mission.questions?.length || 0} คำถาม • Quiz
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      <button
+                        onClick={() => openEdit(mission)}
+                        className="px-3 py-2 rounded-2xl bg-quest-sky text-white text-sm font-medium hover:opacity-90"
+                      >
+                        ✏️ แก้ไขคำถาม
+                      </button>
+                      <button
+                        onClick={() => moveMission(index, -1)}
+                        disabled={index === 0}
+                        className="px-3 py-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-sm font-medium disabled:opacity-40"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        onClick={() => moveMission(index, 1)}
+                        disabled={index === missions.length - 1}
+                        className="px-3 py-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-sm font-medium disabled:opacity-40"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        onClick={() => deleteMission(mission)}
+                        className="px-3 py-2 rounded-2xl bg-red-50 text-red-600 hover:bg-red-100 text-sm font-medium"
+                      >
+                        🗑️ ลบ
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 bg-black/40 overflow-y-auto">
+          <div className="card w-full max-w-2xl p-6 my-8">
+            <h3 className="text-xl font-bold mb-4">
+              {editingId ? 'แก้ไข Mission' : 'เพิ่ม Mission'}
+            </h3>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2">
                   <label className="block text-sm font-medium mb-2">ชื่อ Mission</label>
                   <input
                     type="text"
-                    value={newMission.title}
-                    onChange={(e) => setNewMission(prev => ({ ...prev, title: e.target.value }))}
+                    value={form.title}
+                    onChange={(e) => setForm({ ...form, title: e.target.value })}
                     placeholder="เช่น Memory Basics"
                     className="input"
                   />
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">ประเภท</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {missionTypes.map((type) => (
-                      <button
-                        key={type.value}
-                        onClick={() => setNewMission(prev => ({ ...prev, type: type.value }))}
-                        className={`p-3 rounded-xl border-2 text-center transition-all ${
-                          newMission.type === type.value ? 'border-quest-sky bg-sky-50' : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="text-2xl mb-1">{type.icon}</div>
-                        <div className="text-xs">{type.label}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 <div>
                   <label className="block text-sm font-medium mb-2">XP</label>
                   <input
                     type="number"
-                    value={newMission.xp}
-                    onChange={(e) => setNewMission(prev => ({ ...prev, xp: parseInt(e.target.value) }))}
+                    value={form.xp}
+                    onChange={(e) => setForm({ ...form, xp: Number(e.target.value) })}
                     className="input"
                   />
                 </div>
+              </div>
 
-                {/* Questions */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium">คำถาม ({newMission.questions.length})</label>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium">
+                    คำถาม ({form.questions.length})
+                  </label>
+                  <button
+                    onClick={() =>
+                      setForm((prev) => ({
+                        ...prev,
+                        questions: [...prev.questions, blankQuestion()],
+                      }))
+                    }
+                    className="px-3 py-1.5 rounded-xl bg-quest-sky text-white text-sm font-medium hover:opacity-90"
+                  >
+                    + เพิ่มคำถาม
+                  </button>
+                </div>
+
+                {form.questions.length === 0 ? (
+                  <div className="p-6 text-center bg-gray-50 rounded-2xl text-quest-text/60 text-sm">
+                    ยังไม่มีคำถาม — กดปุ่ม &quot;+ เพิ่มคำถาม&quot; เพื่อเริ่ม
                   </div>
+                ) : (
+                  <div className="space-y-3">
+                    {form.questions.map((question, index) => (
+                      <div key={question.id} className="p-4 bg-gray-50 rounded-2xl">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="font-medium text-sm">คำถามที่ {index + 1}</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => moveQuestion(index, -1)}
+                              disabled={index === 0}
+                              className="w-8 h-8 rounded-xl bg-white hover:bg-gray-200 text-sm disabled:opacity-40"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              onClick={() => moveQuestion(index, 1)}
+                              disabled={index === form.questions.length - 1}
+                              className="w-8 h-8 rounded-xl bg-white hover:bg-gray-200 text-sm disabled:opacity-40"
+                            >
+                              ↓
+                            </button>
+                            <button
+                              onClick={() => removeQuestion(question.id)}
+                              className="w-8 h-8 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 text-sm"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
 
-                  {newMission.questions.map((q, index) => (
-                    <div key={q.id} className="p-3 bg-gray-50 rounded-xl mb-2 flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">คำถาม {index + 1}</p>
-                        <p className="text-sm text-quest-text/60">{q.text}</p>
-                      </div>
-                      <button
-                        onClick={() => removeQuestion(q.id)}
-                        className="text-red-500 hover:text-red-600"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  ))}
-
-                  {/* Add Question Form */}
-                  <div className="p-4 bg-blue-50 rounded-xl space-y-3">
-                    <p className="font-medium text-sm">เพิ่มคำถาม</p>
-                    <input
-                      type="text"
-                      value={newQuestion.text}
-                      onChange={(e) => setNewQuestion(prev => ({ ...prev, text: e.target.value }))}
-                      placeholder="คำถาม"
-                      className="input"
-                    />
-                    {newQuestion.options.map((option, index) => (
-                      <div key={index} className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name="correctAnswer"
-                          checked={newQuestion.correctAnswer === index}
-                          onChange={() => setNewQuestion(prev => ({ ...prev, correctAnswer: index }))}
-                          className="w-4 h-4"
+                        <textarea
+                          rows={2}
+                          value={question.text}
+                          onChange={(e) => setQuestion(question.id, { text: e.target.value })}
+                          placeholder="ใส่คำถาม..."
+                          className="input resize-none mb-3"
                         />
+
+                        <div className="space-y-2">
+                          {question.options.map((option, optionIndex) => (
+                            <div key={optionIndex} className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                name={`correct-${question.id}`}
+                                checked={question.correctAnswer === optionIndex}
+                                onChange={() =>
+                                  setQuestion(question.id, { correctAnswer: optionIndex })
+                                }
+                                className="w-5 h-5 shrink-0"
+                              />
+                              <span className="w-6 text-sm font-medium text-quest-text/60 shrink-0">
+                                {String.fromCharCode(65 + optionIndex)}
+                              </span>
+                              <input
+                                type="text"
+                                value={option}
+                                onChange={(e) =>
+                                  setOption(question.id, optionIndex, e.target.value)
+                                }
+                                placeholder={`ตัวเลือก ${String.fromCharCode(65 + optionIndex)}`}
+                                className="input flex-1"
+                              />
+                            </div>
+                          ))}
+                        </div>
+
+                        <p className="text-xs text-quest-text/60 mt-2">
+                          กดวงกลมข้างตัวเลือก เพื่อทำเครื่องหมายว่าเป็นคำตอบที่ถูกต้อง
+                        </p>
+
                         <input
                           type="text"
-                          value={option}
-                          onChange={(e) => {
-                            const newOptions = [...newQuestion.options];
-                            newOptions[index] = e.target.value;
-                            setNewQuestion(prev => ({ ...prev, options: newOptions }));
-                          }}
-                          placeholder={`ตัวเลือก ${index + 1}`}
-                          className="input flex-1"
+                          value={question.explanation || ''}
+                          onChange={(e) => setQuestion(question.id, { explanation: e.target.value })}
+                          placeholder="คำอธิบายคำตอบ (ไม่บังคับ)"
+                          className="input mt-3"
                         />
                       </div>
                     ))}
-                    <p className="text-xs text-quest-text/60">เลือกว่าตัวเลือกไหนคือคำตอบที่ถูกต้อง</p>
-                    <button
-                      type="button"
-                      onClick={addQuestion}
-                      className="btn-secondary w-full text-sm"
-                    >
-                      + เพิ่มคำถาม
-                    </button>
                   </div>
-                </div>
-              </div>
-
-              {error && (
-                <div className="mt-4 p-3 bg-red-50 text-red-600 rounded-xl text-sm">
-                  {error}
-                </div>
-              )}
-
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() => {
-                    setShowAddModal(false);
-                    setError('');
-                  }}
-                  className="btn-secondary flex-1"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  onClick={handleSaveMission}
-                  disabled={saving}
-                  className="btn-primary flex-1 disabled:opacity-50"
-                >
-                  {saving ? 'กำลังบันทึก...' : 'บันทึก'}
-                </button>
+                )}
               </div>
             </div>
+
+            {error && (
+              <div className="mt-4 p-3 bg-red-50 text-red-600 rounded-xl text-sm">{error}</div>
+            )}
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setModalOpen(false);
+                  setError('');
+                  setEditingId(null);
+                }}
+                className="btn-secondary flex-1"
+              >
+                ยกเลิก
+              </button>
+              <button onClick={save} disabled={saving} className="btn-primary flex-1 disabled:opacity-50">
+                {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+export default function MissionBuilderPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-6xl mb-4 animate-bounce">🦊</div>
+            <p className="text-quest-text/60">กำลังโหลด...</p>
+          </div>
+        </div>
+      }
+    >
+      <MissionsBuilder />
+    </Suspense>
   );
 }

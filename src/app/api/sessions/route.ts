@@ -1,59 +1,52 @@
 import { NextResponse } from 'next/server';
-import { createSession, getSession, updateSession } from '@/lib/db';
+import { createSession, getSession, updateSession, getPlayers, rollUp } from '@/lib/db';
 
-// GET session by gameId
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const gameId = searchParams.get('gameId');
-    
+    const gameId = new URL(request.url).searchParams.get('gameId');
     if (!gameId) {
-      return NextResponse.json(
-        { success: false, error: 'gameId is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'gameId is required' }, { status: 400 });
     }
-
-    const session = await getSession(gameId);
-    return NextResponse.json({ success: true, data: session });
-  } catch (error) {
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch session' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: true, data: await getSession(gameId) });
+  } catch {
+    return NextResponse.json({ success: false, error: 'โหลดสถานะไม่สำเร็จ' }, { status: 500 });
   }
 }
 
-// POST create session
 export async function POST(request: Request) {
   try {
-    const { gameId } = await request.json();
-    const session = await createSession(gameId);
+    const { gameId, force } = await request.json();
+    if (!gameId) {
+      return NextResponse.json({ success: false, error: 'gameId is required' }, { status: 400 });
+    }
+    // force = true คือครูกดเริ่มรอบใหม่ (ล้างผู้เล่นเก่า) ไม่ระบุ = ใช้ห้องที่ยังเปิดอยู่
+    const session = await createSession(gameId, { force: Boolean(force) });
     return NextResponse.json({ success: true, data: session }, { status: 201 });
-  } catch (error) {
-    return NextResponse.json(
-      { success: false, error: 'Failed to create session' },
-      { status: 500 }
-    );
+  } catch {
+    return NextResponse.json({ success: false, error: 'เริ่มเกมไม่สำเร็จ' }, { status: 500 });
   }
 }
 
-// PUT update session
 export async function PUT(request: Request) {
   try {
     const { gameId, ...updates } = await request.json();
+    if (!gameId) {
+      return NextResponse.json({ success: false, error: 'gameId is required' }, { status: 400 });
+    }
     const session = await updateSession(gameId, updates);
     if (!session) {
-      return NextResponse.json(
-        { success: false, error: 'Session not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: 'ยังไม่มีห้องเล่น' }, { status: 404 });
+    }
+
+    // จบเกม → นำคะแนนเข้าสถิติถาวรของนักเรียน (กันซ้ำด้วย completedSessions)
+    if (updates.status === 'completed') {
+      const players = await getPlayers(gameId);
+      for (const p of players) {
+        await rollUp(p.studentId, session.id, p);
+      }
     }
     return NextResponse.json({ success: true, data: session });
-  } catch (error) {
-    return NextResponse.json(
-      { success: false, error: 'Failed to update session' },
-      { status: 500 }
-    );
+  } catch {
+    return NextResponse.json({ success: false, error: 'ทำรายการไม่สำเร็จ' }, { status: 500 });
   }
 }
