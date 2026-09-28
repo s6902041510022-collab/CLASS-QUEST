@@ -14,16 +14,31 @@ function Analytics() {
 
   const [data, setData] = useState<any>(null);
   const [tab, setTab] = useState<'students' | 'questions' | 'games'>('students');
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     if (!getTeacherSession()) {
       router.replace('/teacher/login');
       return;
     }
+    // เปลี่ยนเกม → เคลียร์ข้อมูลเก่า (ภาพรวมกับรายเกมมีโครงสร้างต่างกัน
+    // ถ้าใช้ของเดิมค้างอยู่ GameAnalytics จะอ่าน totals ไม่เจอแล้ว crash)
+    let cancelled = false;
+    setData(null);
+    setLoadError('');
     fetch(`/api/analytics${gameId ? `?gameId=${gameId}` : ''}`)
       .then((r) => r.json())
-      .then((j) => j.success && setData(j.data))
-      .catch(() => {});
+      .then((j) => {
+        if (cancelled) return;
+        if (j.success) setData(j.data);
+        else setLoadError(j.error || 'โหลดข้อมูลไม่สำเร็จ');
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError('โหลดข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [gameId, router]);
 
   return (
@@ -47,7 +62,9 @@ function Analytics() {
         )}
 
         {!data ? (
-          <div className="card p-10 text-center text-quest-text/60">กำลังโหลดข้อมูล...</div>
+          <div className="card p-10 text-center text-quest-text/60">
+            {loadError || 'กำลังโหลดข้อมูล...'}
+          </div>
         ) : gameId ? (
           <GameAnalytics data={data} tab={tab} setTab={setTab} />
         ) : (
@@ -83,7 +100,7 @@ function OverviewAnalytics({ data, tab, setTab }: any) {
 
       {tab === 'games' ? (
         <div className="space-y-2">
-          {data.games.length === 0 ? (
+          {(data.games || []).length === 0 ? (
             <div className="card p-10 text-center text-quest-text/60">ยังไม่มีเกม</div>
           ) : (
             data.games.map((g: any) => (
@@ -109,11 +126,15 @@ function OverviewAnalytics({ data, tab, setTab }: any) {
         </div>
       ) : (
         <div className="space-y-2">
-          {data.students.length === 0 ? (
+          {(data.students || []).length === 0 ? (
             <div className="card p-10 text-center text-quest-text/60">ยังไม่มีนักเรียนในระบบ</div>
           ) : (
             data.students.map((s: any) => (
-              <div key={s.id} className="card p-4 flex items-center gap-4">
+              <Link
+                key={s.id}
+                href={`/student/me?studentId=${s.id}`}
+                className="card p-4 flex items-center gap-4 hover:shadow-card transition-shadow"
+              >
                 <span className="text-2xl shrink-0">{s.avatar}</span>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium truncate">{s.name}</p>
@@ -125,7 +146,8 @@ function OverviewAnalytics({ data, tab, setTab }: any) {
                   <p className="font-bold text-quest-sky">{s.totalXp} XP</p>
                   <p className="text-xs text-quest-text/60">{s.accuracy}% แม่นยำ</p>
                 </div>
-              </div>
+                <span className="text-quest-text/30">›</span>
+              </Link>
             ))
           )}
         </div>
@@ -136,7 +158,9 @@ function OverviewAnalytics({ data, tab, setTab }: any) {
 
 // ---------- วิเคราะห์รายเกม ----------
 function GameAnalytics({ data, tab, setTab }: any) {
-  const t = data.totals;
+  // กันข้อมูลยังไม่พร้อม (ผ่าน transition หรือเกมไม่มีรอบเล่น) — ไม่ crash
+  const t = data?.totals;
+  if (!t) return null;
   return (
     <>
       <div className="card p-5 mb-5">
@@ -155,7 +179,7 @@ function GameAnalytics({ data, tab, setTab }: any) {
             </div>
           ))}
         </div>
-        {data.sessions > 0 && (
+        {(data.sessions || 0) > 0 && (
           <p className="text-xs text-quest-text/60 text-center mt-3">
             เล่นไปแล้ว {data.sessions} รอบ
           </p>
@@ -182,14 +206,18 @@ function GameAnalytics({ data, tab, setTab }: any) {
       </div>
 
       {tab === 'students' ? (
-        data.students.length === 0 ? (
+        (data.students || []).length === 0 ? (
           <div className="card p-10 text-center text-quest-text/60">
             ยังไม่มีนักเรียนเล่นเกมนี้
           </div>
         ) : (
           <div className="space-y-2">
             {data.students.map((s: any, i: number) => (
-              <div key={s.id} className="card p-4 flex items-center gap-3">
+              <Link
+                key={s.id}
+                href={`/student/me?studentId=${s.id}&gameId=${data.game?.id}`}
+                className="card p-4 flex items-center gap-3 hover:shadow-card transition-shadow"
+              >
                 <span
                   className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${
                     i === 0
@@ -214,13 +242,14 @@ function GameAnalytics({ data, tab, setTab }: any) {
                   <p className="font-bold text-quest-sky">{s.xp} XP</p>
                   <p className="text-xs text-quest-text/60">{s.accuracy}%</p>
                 </div>
-              </div>
+                <span className="text-quest-text/30">›</span>
+              </Link>
             ))}
           </div>
         )
       ) : (
         <div className="space-y-3">
-          {data.questions.map((q: any, i: number) => (
+          {(data.questions || []).map((q: any, i: number) => (
             <div key={q.questionId} className="card p-5">
               <div className="flex items-start gap-2 mb-3">
                 <span className="text-xs font-bold text-quest-text/30 shrink-0">#{i + 1}</span>

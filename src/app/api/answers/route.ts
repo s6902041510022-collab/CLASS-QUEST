@@ -9,13 +9,14 @@ import {
   currentSessionIndex,
   sessionBossHpLeft,
   settleBossDefeat,
+  advancePlayerPosition,
 } from '@/lib/db';
-import { BOSS_DAMAGE_PER_CORRECT } from '@/lib/utils';
+import { BOSS_DAMAGE_PER_CORRECT, BONUS_MAX_XP } from '@/lib/utils';
 
 // POST บันทึกคำตอบ 1 ข้อ (เขียนข้อมูลทั้งหมดในรอบเดียว เพื่อกันเขียนซ้อนแล้วข้อมูลหาย)
 export async function POST(request: Request) {
   try {
-    const { playerId, gameId, missionId, questionId, selectedAnswer } = await request.json();
+    const { playerId, gameId, missionId, questionId, selectedAnswer, timeTakenSec } = await request.json();
     if (!playerId || !gameId || !missionId || questionId == null || selectedAnswer == null) {
       return NextResponse.json({ success: false, error: 'ข้อมูลไม่ครบ' }, { status: 400 });
     }
@@ -45,11 +46,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'ไม่พบผู้เล่น' }, { status: 404 });
     }
 
-    // ตอบซ้ำข้อเดียวกันไม่นับซ้ำ
-    if ((player.answers || []).some((a: any) => a.questionId === questionId)) {
+    // ตอบซ้ำข้อเดียวกันไม่นับซ้ำ — คืนผลเดิมที่เคยตอบไว้ (เผื่อโหลดหน้าซ้ำกลางระหว่างดูเฉลย)
+    const prev = (player.answers || []).find((a: any) => a.questionId === questionId);
+    if (prev) {
       return NextResponse.json({
         success: true,
-        data: { alreadyAnswered: true, correct: false, xpGained: 0, totalXp: player.xp },
+        data: {
+          alreadyAnswered: true,
+          correct: Boolean(prev.correct),
+          correctAnswer: prev.correctAnswer ?? question.correctAnswer,
+          explanation: question.explanation || '',
+          xpGained: 0,
+          totalXp: player.xp,
+          posMission: Number(player.posMission) || 0,
+          posQuestion: Number(player.posQuestion) || 0,
+          quizDone: Boolean(player.quizDone),
+          bossPos: Number(player.bossPos) || 0,
+          bossDone: Boolean(player.bossDone),
+        },
       });
     }
 
@@ -57,8 +71,21 @@ export async function POST(request: Request) {
     const correct = Number(selectedAnswer) === Number(question.correctAnswer);
     const xpGained = correct ? mission.xp || 100 : 0;
 
+    // === โบนัส "ตอบเร็ว" — เฉพาะคำตอบที่ถูกเท่านั้น ===
+    // เทียบเวลาที่ใช้อัปเดตกับงบเวลารายข้อ (session.timeLimit): เหลือเท่าไหร่ ได้สัดส่วนเท่านั้น
+    let speedBonus = 0;
+    if (correct) {
+      const siT = currentSessionIndex(db.data.sessions, gameId);
+      const sT = siT >= 0 ? db.data.sessions[siT] : undefined;
+      const budget = Number(sT?.timeLimit) || 0;
+      if (budget > 0) {
+        const used = Math.max(0, Math.min(budget, Number(timeTakenSec) || 0));
+        speedBonus = Math.round(BONUS_MAX_XP * ((budget - used) / budget));
+      }
+    }
+
     // บันทึกคำตอบ (เขียนใน array เดียวกันกับ player — merge ปลอดภัยตาม id)
-    player.xp = (player.xp || 0) + xpGained;
+    player.xp = (player.xp || 0) + xpGained + speedBonus;
     player.correctAnswers = (player.correctAnswers || 0) + (correct ? 1 : 0);
     player.totalAnswers = (player.totalAnswers || 0) + 1;
     player.answers = [
@@ -72,6 +99,7 @@ export async function POST(request: Request) {
         correctAnswer: Number(question.correctAnswer),
         correct,
         xp: xpGained,
+        bonus: speedBonus,
         at: new Date().toISOString(),
       },
     ];
@@ -104,6 +132,10 @@ export async function POST(request: Request) {
       }
     }
 
+    // === โหมดนักเรียนไปเอง: ตอบถูกแล้วเลื่อนข้อถัดไปทันที (ไม่ต้องรอครูกดถัดไป) ===
+    // รวมเขียนไว้รอบเดียวกับคำตอบ — กันข้อมูลไม่ตรงกันถ้าเขียนแยกจังหวะ
+    if (correct) advancePlayerPosition(db, player);
+
     await db.write();
 
     // ตรวจผล "รวม" หลัง merge: แต่ละคนเห็นข้อมูลเพียงส่วนเดียวตอนตอบพร้อมกัน
@@ -127,12 +159,19 @@ export async function POST(request: Request) {
         correctAnswer: question.correctAnswer,
         explanation: question.explanation || '',
         xpGained,
+        speedBonus,
         totalXp: player.xp ?? 0,
         correctAnswers: player.correctAnswers ?? 0,
         totalAnswers: player.totalAnswers ?? 0,
         boss: isBossQuestion,
         bossHit,
         bossHpLeft,
+        // ตำแหน่งล่าสุด (ตอบถูกแล้วเลื่อน)
+        posMission: Number(player.posMission) || 0,
+        posQuestion: Number(player.posQuestion) || 0,
+        quizDone: Boolean(player.quizDone),
+        bossPos: Number(player.bossPos) || 0,
+        bossDone: Boolean(player.bossDone),
       },
     });
   } catch {

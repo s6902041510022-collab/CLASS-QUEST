@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { MASCOT } from '@/lib/utils';
 import { getTeacherSession, clearTeacherSession } from '@/lib/auth';
@@ -14,6 +14,7 @@ type Props = {
 
 export default function TeacherHeader({ title, subtitle, backHref }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
   const [teacher, setTeacher] = useState<{ name: string; avatar: string } | null>(null);
 
   useEffect(() => {
@@ -30,6 +31,15 @@ export default function TeacherHeader({ title, subtitle, backHref }: Props) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
+            {pathname !== '/teacher/dashboard' ? (
+              <Link
+                href="/teacher/dashboard"
+                title="กลับหน้าหลักครู"
+                className="shrink-0 text-quest-text/60 hover:text-quest-sky text-xl"
+              >
+                🏠
+              </Link>
+            ) : null}
             {backHref ? (
               <Link
                 href={backHref}

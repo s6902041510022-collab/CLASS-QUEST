@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { MASCOT } from '@/lib/utils';
+import HomeButton from '@/components/HomeButton';
 
 function Me() {
   const sp = useSearchParams();
@@ -73,6 +74,9 @@ function Me() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 via-lavender-50 to-mint-50 p-4">
+      <div className="fixed top-4 left-4 z-50">
+        <HomeButton />
+      </div>
       <div className="max-w-2xl mx-auto py-6">
         <div className="text-center mb-6">
           <div className="text-6xl mb-3 animate-float">{student.avatar}</div>

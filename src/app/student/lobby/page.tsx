@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { MASCOT } from '@/lib/utils';
+import HomeButton from '@/components/HomeButton';
 
 function Lobby() {
   const router = useRouter();
@@ -69,6 +70,9 @@ function Lobby() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 via-lavender-50 to-mint-50 flex items-center justify-center p-4">
+      <div className="fixed top-4 left-4 z-50">
+        <HomeButton />
+      </div>
       <div className="card w-full max-w-lg p-8 text-center">
         <div className="text-7xl mb-4 animate-bounce-soft">{MASCOT.emoji}</div>
 

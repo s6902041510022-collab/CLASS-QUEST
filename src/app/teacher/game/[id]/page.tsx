@@ -56,8 +56,6 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
     updateSession({ timeAction, ...(timeSeconds != null ? { timeSeconds } : {}) });
 
   const status = session?.status || 'lobby';
-  const missionIndex = session?.currentMissionIndex ?? 0;
-  const questionIndex = session?.currentQuestionIndex ?? 0;
 
   // ลำดับเล่น = ด่านควิซทั้งหมดก่อน แล้วด่านบอสต่อท้ายเสมอ (ตรงกับเซิร์ฟเวอร์)
   const flowMissions = [...missions]
@@ -74,8 +72,15 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
       : Math.max(0, bossHpMax - bossHits * BOSS_DAMAGE_PER_CORRECT);
   const bossDefeated = bossHpLeft <= 0;
 
-  const mission = flowMissions[missionIndex];
-  const question = mission?.questions?.[questionIndex];
+  // ความคืบหน้านักเรียน (โหมดนักเรียนไปเอง)
+  const startedCount = players.filter((p: any) => (p.answers || []).length > 0).length;
+  const quizDoneCount = players.filter((p: any) => p.quizDone || quizCount === 0).length;
+
+  const progressLabel = (p: any) => {
+    if (p.bossDone) return '⚔️ สู้บอสครบ';
+    if (p.quizDone) return status === 'boss' ? '⚔️ สู้บอสอยู่' : '✅ ควิซครบ';
+    return `Mission ${(Number(p.posMission) || 0) + 1} • ข้อ ${(Number(p.posQuestion) || 0) + 1}`;
+  };
 
   const loadStatic = useCallback(async () => {
     try {
@@ -182,59 +187,16 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
   };
 
   // ปุ่มหลักตามสถานะ
-  const goNext = () => {
-    // อยู่ในด่านบอส → เลื่อนคำถามบอส
-    if (status === 'boss' && bossMission) {
-      const total = bossMission.questions?.length || 0;
-      if (questionIndex + 1 < total) {
-        updateSession({ currentQuestionIndex: questionIndex + 1 });
-      }
-      return;
-    }
-    // ยังมีด่านควิซเหลือ → ไปด่านถัดไป
-    if (missionIndex + 1 < quizCount) {
-      updateSession({
-        status: 'question',
-        currentMissionIndex: missionIndex + 1,
-        currentQuestionIndex: 0,
-      });
-      return;
-    }
-    // จบด่านควิซทั้งหมด → เข้าด่านบอส (เปิดการโจมตีใหม่)
-    if (bossMission && bossIndex >= 0) {
-      updateSession({
-        status: 'boss',
-        currentMissionIndex: bossIndex,
-        currentQuestionIndex: 0,
-        bossHp: bossHpMax,
-        bossHits: [],
-      });
-    } else {
-      updateSession({ status: 'boss', bossHp: bossHpMax });
-    }
-  };
-
-  const goBack = () => {
-    // ย้อนกลับในด่านบอส
-    if (status === 'boss' && bossMission) {
-      if (questionIndex > 0) {
-        updateSession({ currentQuestionIndex: questionIndex - 1 });
-      } else if (quizCount > 0) {
-        // กลับไปข้อสุดท้ายของด่านควิซด่านสุดท้าย
-        const lastQuiz = flowMissions[quizCount - 1];
-        updateSession({
-          status: 'question',
-          currentMissionIndex: quizCount - 1,
-          currentQuestionIndex: Math.max(0, (lastQuiz?.questions?.length || 1) - 1),
-        });
-      }
-      return;
-    }
-    if (questionIndex > 0) {
-      updateSession({ currentQuestionIndex: questionIndex - 1 });
-    } else if (missionIndex > 0) {
-      updateSession({ currentMissionIndex: missionIndex - 1, currentQuestionIndex: 0 });
-    }
+  // นักเรียนตอบถูกเลื่อนข้อเองแล้ว → ครูเหลือแค่ "เปิดด่านบอส" เท่านั้น
+  const startBoss = () => {
+    if (!bossMission || !session) return;
+    updateSession({
+      status: 'boss',
+      currentMissionIndex: bossIndex,
+      currentQuestionIndex: 0,
+      bossHp: bossHpMax,
+      bossHits: [],
+    });
   };
 
   // ใช้เฉพาะเกมที่ไม่มีด่านบอส (โหมดเก่า) — ครูกดโจมตีเองทีละ 100 HP
@@ -305,20 +267,16 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
     );
   }
 
-  const answeredCount = players.filter((p) => {
-    const m = mission;
-    const q = m?.questions?.[questionIndex];
-    if (!m || !q) return false;
-    return (p.answers || []).some((a: any) => a.missionId === m.id && a.questionId === q.id);
-  }).length;
-
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3 min-w-0">
-              <Link href="/teacher/games" className="text-quest-text/60 hover:text-quest-sky">
+              <Link href="/teacher/dashboard" title="กลับหน้าหลักครู" className="text-xl text-quest-text/60 hover:text-quest-sky shrink-0">
+                🏠
+              </Link>
+              <Link href="/teacher/games" className="text-quest-text/60 hover:text-quest-sky shrink-0">
                 ←
               </Link>
               <span className="text-2xl shrink-0">{MASCOT.emoji}</span>
@@ -400,16 +358,16 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
               {/* สถานะปัจจุบัน */}
               <div className="grid grid-cols-3 gap-3 mb-6">
                 <div className="text-center p-4 bg-gray-50 rounded-2xl">
-                  <p className="text-2xl font-bold">
-                    {status === 'boss' ? '👹' : `${Math.min(missionIndex + 1, quizCount)}/${quizCount}`}
+                  <p className="text-2xl font-bold text-green-600">
+                    {quizDoneCount}/{players.length || 0}
                   </p>
-                  <p className="text-xs text-quest-text/60">{status === 'boss' ? 'BOSS' : 'Mission'}</p>
+                  <p className="text-xs text-quest-text/60">✅ ควิซครบ</p>
                 </div>
                 <div className="text-center p-4 bg-gray-50 rounded-2xl">
                   <p className="text-2xl font-bold">
-                    {answeredCount}/{players.length || 0}
+                    {startedCount}/{players.length || 0}
                   </p>
-                  <p className="text-xs text-quest-text/60">ตอบแล้ว</p>
+                  <p className="text-xs text-quest-text/60">⚡ เริ่มแล้ว</p>
                 </div>
                 <div className="text-center p-4 bg-gray-50 rounded-2xl">
                   <p
@@ -425,28 +383,13 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                 </div>
               </div>
 
-              {/* คำถามที่กำลังเล่น */}
-              {status === 'question' && question ? (
+              {/* โหมดเล่นเร็ว — อธิบายให้นักเรียนไปเอง */}
+              {status === 'question' ? (
                 <div className="p-4 bg-sky-50 rounded-2xl mb-6">
-                  <p className="text-xs text-quest-text/60 mb-1">
-                    {mission?.title} • คำถามที่ {questionIndex + 1}
+                  <p className="font-medium mb-1">🎮 ทุกคนเล่นพร้อมกัน (โหมดนักเรียนไปเอง)</p>
+                  <p className="text-sm text-quest-text/60">
+                    นักเรียนตอบถูกแล้วจะเลื่อนไปข้อถัดไปทันที ไม่ต้องรอครูกด ครูดูความคืบหน้ารายคนได้จากรายชื่อด้านขวา
                   </p>
-                  <p className="font-medium mb-3">{question.text}</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {(question.options || []).map((option: string, i: number) => (
-                      <div
-                        key={i}
-                        className={`p-2.5 rounded-xl text-sm ${
-                          i === question.correctAnswer
-                            ? 'bg-green-100 text-green-800 font-medium'
-                            : 'bg-white text-quest-text/70'
-                        }`}
-                      >
-                        {String.fromCharCode(65 + i)}. {option}
-                        {i === question.correctAnswer ? ' (ถูกต้อง)' : ''}
-                      </div>
-                    ))}
-                  </div>
                 </div>
               ) : status === 'boss' ? (
                 <div className="p-4 bg-red-50 rounded-2xl mb-6">
@@ -462,38 +405,15 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                     <p className="text-sm text-quest-text/60 mt-2">
                       HP: {bossHpLeft} / {bossHpMax}
                       {bossMission && !bossDefeated ? ` • ตอบถูก = บอสเสีย ${BOSS_DAMAGE_PER_CORRECT} HP` : ''}
+                      {!bossMission ? ' • โหมดเก่า (ครูกดโจมตีเอง)' : ''}
                     </p>
                     {bossDefeated && (
                       <p className="mt-2 font-bold text-green-600">🎉 ชนะบอสแล้ว!</p>
                     )}
                   </div>
-                  {bossMission && question && (
-                    <div className="mt-4 p-4 bg-white/70 rounded-2xl">
-                      <p className="text-xs text-quest-text/60 mb-1">
-                        {bossMission.title} • คำถามบอสที่ {questionIndex + 1}/
-                        {bossMission.questions?.length || 0}
-                      </p>
-                      <p className="font-medium mb-3">{question.text}</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {(question.options || []).map((option: string, i: number) => (
-                          <div
-                            key={i}
-                            className={`p-2.5 rounded-xl text-sm ${
-                              i === question.correctAnswer
-                                ? 'bg-green-100 text-green-800 font-medium'
-                                : 'bg-white text-quest-text/70'
-                            }`}
-                          >
-                            {String.fromCharCode(65 + i)}. {option}
-                            {i === question.correctAnswer ? ' (ถูกต้อง)' : ''}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {bossMission && !question && (
+                  {bossMission && (bossMission.questions?.length || 0) === 0 && (
                     <p className="text-center text-quest-text/60 text-sm mt-3">
-                      ยังไม่มีคำถามบอส — ไปเพิ่มในจัดการคำถาม
+                      ยังไม่มีคำถามบอส — นักเรียนจะเห็นหน้าจอ HP รอครูโจมตีเอง
                     </p>
                   )}
                 </div>
@@ -512,20 +432,15 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {status === 'question' ? (
                     <>
-                      <button
-                        onClick={goNext}
-                        disabled={busy}
-                        className="col-span-2 sm:col-span-4 p-4 rounded-2xl bg-quest-sky text-white font-bold text-lg hover:opacity-90 disabled:opacity-50"
-                      >
-                        ⏭️ ถัดไป
-                      </button>
-                      <button
-                        onClick={goBack}
-                        disabled={busy || (questionIndex === 0 && missionIndex === 0)}
-                        className="p-3 rounded-2xl bg-gray-100 hover:bg-gray-200 font-medium disabled:opacity-40"
-                      >
-                        ← ย้อนกลับ
-                      </button>
+                      {bossMission && (
+                        <button
+                          onClick={startBoss}
+                          disabled={busy || players.length === 0}
+                          className="col-span-2 sm:col-span-4 p-4 rounded-2xl bg-primary-500 text-white font-bold text-lg hover:bg-primary-600 disabled:opacity-50"
+                        >
+                          ⚔️ เปิดด่านบอส
+                        </button>
+                      )}
                       <button
                         onClick={() => updateSession({ status: 'paused' })}
                         disabled={busy}
@@ -559,20 +474,11 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                     bossMission ? (
                       <>
                         <button
-                          onClick={questionIndex + 1 >= (bossMission.questions?.length || 0) ? endGame : goNext}
+                          onClick={endGame}
                           disabled={busy}
-                          className="col-span-2 sm:col-span-4 p-4 rounded-2xl bg-primary-500 text-white font-bold text-lg hover:bg-primary-600 disabled:opacity-50"
+                          className="col-span-2 sm:col-span-4 p-4 rounded-2xl bg-gray-100 hover:bg-gray-200 font-bold text-lg"
                         >
-                          {questionIndex + 1 >= (bossMission.questions?.length || 0)
-                            ? '🏁 จบเกม'
-                            : '⏭️ คำถามบอสถัดไป'}
-                        </button>
-                        <button
-                          onClick={goBack}
-                          disabled={busy || (questionIndex === 0 && quizCount === 0)}
-                          className="p-3 rounded-2xl bg-gray-100 hover:bg-gray-200 font-medium disabled:opacity-40"
-                        >
-                          ← ย้อนกลับ
+                          🏁 จบเกม
                         </button>
                         <button
                           onClick={() => updateSession({ status: 'paused' })}
@@ -623,8 +529,7 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
               <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
                 <h2 className="text-lg font-bold">⏱️ จับเวลา</h2>
                 <span className="text-xs text-quest-text/60">
-                  Mission นี้ตั้งไว้{' '}
-                  {mission?.timeLimit ? `${mission.timeLimit} วินาที` : 'ไม่จับเวลา'}
+                  เวลาต่อข้อของนักเรียน: {timeLimit ? `${timeLimit} วินาที` : 'ไม่จับเวลา'} • กด +/− เปลี่ยนได้ระหว่างเล่น
                 </span>
               </div>
 
@@ -759,13 +664,14 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                 <div className="space-y-2">
                   {flowMissions.map((m: any, index: number) => {
                     const isBoss = m.type === 'boss';
-                    const isCurrent =
-                      index === missionIndex &&
-                      (status === 'question' || (status === 'boss' && isBoss));
-                    const isDone =
-                      index < missionIndex ||
-                      (status === 'boss' && bossMission && index < bossIndex) ||
-                      status === 'completed';
+                    const someActive = players.some((p: any) => !p.quizDone);
+                    const isCurrent = isBoss
+                      ? status === 'boss' && players.some((p: any) => p.quizDone && !p.bossDone)
+                      : status !== 'boss' && someActive &&
+                        players.some((p: any) => !p.quizDone && (Number(p.posMission) || 0) === index);
+                    const isDone = players.length > 0 && (isBoss
+                      ? players.every((p: any) => p.bossDone)
+                      : players.every((p: any) => p.quizDone || (Number(p.posMission) || 0) > index));
                     return (
                       <div
                         key={m.id}
@@ -840,15 +746,16 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
                   {[...players]
                     .sort((a, b) => (b.xp || 0) - (a.xp || 0))
                     .map((p: any, index: number) => (
-                      <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
+                      <div key={p.id} className="p-3 bg-gray-50 rounded-2xl">
                         <div className="flex items-center gap-3 min-w-0">
                           <span className="text-xs font-bold text-quest-text/40 w-4">{index + 1}</span>
                           <span className="text-xl">{p.avatar}</span>
-                          <span className="font-medium text-sm truncate">{p.nickname}</span>
+                          <span className="font-medium text-sm truncate flex-1">{p.nickname}</span>
+                          <span className="text-sm font-bold text-quest-sky shrink-0">
+                            {p.xp || 0} XP
+                          </span>
                         </div>
-                        <span className="text-sm font-bold text-quest-sky shrink-0">
-                          {p.xp || 0} XP
-                        </span>
+                        <p className="text-xs text-quest-text/60 ml-8 mt-1">{progressLabel(p)}</p>
                       </div>
                     ))}
                 </div>

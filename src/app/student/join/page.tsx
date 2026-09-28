@@ -125,6 +125,11 @@ export default function StudentJoinPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 via-lavender-50 to-mint-50 flex items-center justify-center p-4">
+      <div className="fixed top-4 left-4 z-50">
+        <Link href="/student/join" title="กลับหน้าหลัก" className="text-2xl text-quest-text/60 hover:text-quest-sky transition-colors">
+          🏠
+        </Link>
+      </div>
       <div className="card w-full max-w-md p-8">
         <div className="text-center mb-6">
           <div className="text-6xl mb-4 animate-float">{MASCOT.emoji}</div>
@@ -164,7 +169,7 @@ export default function StudentJoinPage() {
               {busy ? 'กำลังตรวจสอบ...' : 'ถัดไป'}
             </button>
           </form>
-        ) : !showPick ? (
+        ) : me && !showPick ? (
           <div className="space-y-3">
             <button
               onClick={() => join(me!.studentId)}
@@ -217,7 +222,7 @@ export default function StudentJoinPage() {
                   >
                     <span className="text-2xl">{s.avatar}</span>
                     <span className="font-medium flex-1 text-left truncate">{s.name}</span>
-                    {s.id === me!.studentId && (
+                    {s.id === me?.studentId && (
                       <span className="text-xs text-quest-sky font-medium">คุณ</span>
                     )}
                   </button>

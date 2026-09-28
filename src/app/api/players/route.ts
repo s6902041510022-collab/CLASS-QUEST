@@ -6,12 +6,22 @@ import {
   createSession,
   getStudent,
   updateStudent,
+  getDb,
 } from '@/lib/db';
 
-// GET ผู้เล่นในห้อง (รอบปัจจุบัน)
+// GET ผู้เล่นในห้อง (รอบปัจจุบัน) หรือระบุ id เพื่อเอารายเดียว (แก้ไขโหมด self-paced)
 export async function GET(request: Request) {
   try {
-    const gameId = new URL(request.url).searchParams.get('gameId');
+    const url = new URL(request.url);
+    const singleId = url.searchParams.get('id');
+    if (singleId) {
+      const player = (await getDb()).data.players.find((p: any) => p.id === singleId);
+      if (!player) {
+        return NextResponse.json({ success: false, error: 'ไม่พบผู้เล่น' }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, data: player });
+    }
+    const gameId = url.searchParams.get('gameId');
     if (!gameId) {
       return NextResponse.json({ success: false, error: 'gameId is required' }, { status: 400 });
     }

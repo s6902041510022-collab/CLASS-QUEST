@@ -477,6 +477,12 @@ export async function createPlayer(data: any) {
     correctAnswers: 0,
     totalAnswers: 0,
     answers: [],
+    // ตำแหน่งการเล่นแบบ "นักเรียนไปเอง" (self-paced) — แต่ละคนเลื่อนข้อตามจังหวะตัวเอง
+    posMission: 0,
+    posQuestion: 0,
+    quizDone: false,
+    bossPos: 0,
+    bossDone: false,
     joinedAt: new Date().toISOString(),
   };
   db.data.players.push(player);
@@ -510,6 +516,72 @@ export async function updatePlayer(id: string, updates: any) {
   db.data.players[i] = { ...db.data.players[i], ...updates };
   await db.write();
   return db.data.players[i];
+}
+
+/**
+ * เลื่อนตำแหน่งของนักเรียนไปข้อถัดไป (โหมด "นักเรียนไปเอง" / self-paced)
+ * - ยังอยู่ในด่านควิซ → ข้ามข้อถัดไปของ Mission นั้น (ข้าม Mission ที่ไม่มีคำถาม)
+ * - ตอบครบทุกข้อควิซ → ตีตรา quizDone (ได้เข้าสู้บอสเมื่อครูกดเปิดด่านบอส)
+ * - อยู่ในด่านบอส (ควิซผ่านแล้ว) → เลื่อนคำถามบอส ครบแล้วตีตรา bossDone
+ * ทำงานบน player ในหน่วยความจำ — เรียกก่อน db.write() เพื่อเขียนรอบเดียว
+ */
+export function advancePlayerPosition(db: any, player: any): void {
+  const si = currentSessionIndex(db.data.sessions, player.gameId);
+  const session = si >= 0 ? db.data.sessions[si] : undefined;
+  const flow = sortMissionsForPlay(
+    (db.data.missions || []).filter((m: any) => m.gameId === player.gameId)
+  );
+  const quiz = flow.filter((m: any) => m.type !== 'boss');
+  const bossMission = flow.find((m: any) => m.type === 'boss');
+
+  // อยู่ในด่านบอส และผ่านด่านควิซมาแล้ว → เลื่อนคำถามบอส
+  if (session?.status === 'boss' && player.quizDone && bossMission) {
+    const total = bossMission.questions?.length || 0;
+    const next = Math.max(0, Number(player.bossPos) || 0) + 1;
+    if (next < total) {
+      player.bossPos = next;
+    } else {
+      player.bossPos = total;
+      player.bossDone = true;
+    }
+    return;
+  }
+
+  // ยังอยู่ในด่านควิซ → เลื่อนข้อควิซ
+  if (quiz.length === 0) {
+    // เกมที่มีแต่ด่านบอส → ผ่านควิซได้เลย
+    player.quizDone = true;
+    return;
+  }
+
+  let mi = Math.max(0, Number(player.posMission) || 0);
+  let qi = Math.max(0, Number(player.posQuestion) || 0);
+  const startMi = mi;
+
+  // ข้าม Mission ที่ไม่มีคำถาม (ถ้าตัวอยู่จุดนั้น ให้เริ่มข้อแรกของ Mission ถัดไป)
+  while (mi < quiz.length && !(quiz[mi].questions?.length > 0)) mi++;
+  if (mi >= quiz.length) {
+    player.quizDone = true;
+    return;
+  }
+  if (mi !== startMi) qi = 0;
+
+  if (qi + 1 < (quiz[mi].questions?.length || 0)) {
+    qi += 1;
+  } else {
+    // หมด Mission นี้ → Mission ถัดไปที่มีคำถาม
+    mi += 1;
+    while (mi < quiz.length && !(quiz[mi].questions?.length > 0)) mi++;
+    qi = 0;
+  }
+
+  if (mi < quiz.length) {
+    player.posMission = mi;
+    player.posQuestion = qi;
+  } else {
+    // ตอบครบทุกข้อควิซแล้ว → ผ่านได้เลย (เข้าบอสเมื่อครูกดเปิด)
+    player.quizDone = true;
+  }
 }
 
 // นำคะแนนของรอบหนึ่งเข้าสถิติถาวร (กันนับซ้ำด้วย completedSessions)
@@ -656,8 +728,13 @@ function applyTimeAction(s: any, action: string, seconds: any) {
   if (action === 'add' || action === 'sub') {
     const delta = clampTime(seconds) * (action === 'add' ? 1 : -1);
     const next = clampTime(left + delta);
-    // กำลังนับอยู่ -> เลื่อนเวลาสิ้นสุด, หยุดอยู่ -> เก็บเป็นเวลาที่เหลือ
-    Object.assign(s, { timeLeft: next, timeDeadline: running ? now + next * 1000 : null });
+    // โหมด self-paced: timeLimit คือ "เวลาต่อข้อของทุกคน" ดังนั้น +/− ต้องเปลี่ยนงบด้วย
+    // ไม่งั้นฝั่งนักเรียน (ซึ่งนับถอยหลังในใจจาก timeLimit) จะไม่เห็นผลที่ครูกด
+    Object.assign(s, {
+      timeLimit: next,
+      timeLeft: next,
+      timeDeadline: running ? now + next * 1000 : null,
+    });
     return;
   }
   if (action === 'set') {
