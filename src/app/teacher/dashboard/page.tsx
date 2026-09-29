@@ -25,6 +25,9 @@ export default function TeacherDashboardPage() {
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // อ่านชื่อครูหลัง mount เท่านั้น ถ้าอ่านตอน render เซิร์ฟเวอร์จะได้ 'ครู'
+  // แต่ client ได้ 'ครูกิตติ' → เกิด hydration mismatch แล้วหน้ากะพริบวาดใหม่ทั้งหน้า
+  const [teacherName, setTeacherName] = useState('');
 
   const loadGames = useCallback(async () => {
     try {
@@ -61,6 +64,7 @@ export default function TeacherDashboardPage() {
       router.replace('/teacher/login');
       return;
     }
+    setTeacherName(getTeacherSession()?.name || '');
     loadGames();
   }, [router, loadGames]);
 
@@ -82,7 +86,7 @@ export default function TeacherDashboardPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h2 className="text-2xl font-bold mb-2">
-            สวัสดี, {getTeacherSession()?.name || 'ครู'}! 👋
+            สวัสดี, {teacherName || 'ครู'}! 👋
           </h2>
           <p className="text-quest-text/60">{MASCOT.name} พร้อมช่วยคุณสร้างเกมการเรียนรู้แล้วนะ</p>
         </div>
