@@ -25,6 +25,13 @@ export default function TeacherStudentsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  // ค้นหาชื่อนักเรียน
+  const [query, setQuery] = useState('');
+  // กดโฟลเดอร์เพื่อกรอง: '' = ทั้งหมด, 'none' = ไม่มีห้อง, หรือ groupId
+  const [filterGroup, setFilterGroup] = useState('');
+  // เลือกหลายคนเพื่อย้ายเข้าห้องพร้อมกัน
+  const [picked, setPicked] = useState<string[]>([]);
+  const [bulkTarget, setBulkTarget] = useState('');
 
   useEffect(() => {
     if (!getTeacherSession()) {
@@ -182,6 +189,39 @@ export default function TeacherStudentsPage() {
   const countIn = (gid: string) => students.filter((s: any) => (s.groupId || '') === gid).length;
   const unassigned = students.filter((s: any) => !s.groupId);
 
+  // กรองตามคำค้น (ชื่อ + ห้อง) แล้วกรองตามโฟลเดอร์ที่เลือก
+  const q = query.trim().toLowerCase();
+  const matchQuery = (s: any) => !q || String(s.name).toLowerCase().includes(q);
+  const inFilter = (s: any) =>
+    filterGroup === '' ? true : filterGroup === 'none' ? !s.groupId : s.groupId === filterGroup;
+
+  // ย้ายหลายคนเข้าห้องเดียวกัน
+  const movePicked = async () => {
+    if (picked.length === 0) return;
+    const label =
+      bulkTarget === '' ? 'ไม่มีห้องเรียน' : `📁 ${groupById.get(bulkTarget)?.name || ''}`;
+    if (!confirm(`ย้าย ${picked.length} คน เข้า "${label}"?`)) return;
+    await Promise.all(
+      picked.map((id) =>
+        fetch(`/api/students/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ groupId: bulkTarget }),
+        })
+      )
+    );
+    setPicked([]);
+    load();
+  };
+
+  const togglePick = (id: string) =>
+    setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  // รายชื่อที่จะแสดงในการ์ของแต่ละห้อง (ตามตัวกรอง + คำค้น)
+  const membersOf = (gid: string) => students.filter((s: any) => (s.groupId || '') === gid && matchQuery(s));
+  const shownGroups = groups.filter((g: any) => filterGroup === '' || filterGroup === g.id);
+  const showUnassigned = (filterGroup === '' || filterGroup === 'none') && unassigned.some(matchQuery);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <TeacherHeader
@@ -256,27 +296,61 @@ export default function TeacherStudentsPage() {
               📁 + สร้างห้อง
             </button>
           </div>
-          {groups.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-4">
+        </form>
+
+        {/* แถบโฟลเดอร์ — กดเพื่อกรองรายชื่อ */}
+        {groups.length > 0 && (
+          <div className="card p-4">
+            <p className="text-sm font-bold mb-3">📁 กดโฟลเดอร์เพื่อดูเฉพาะห้องนั้น</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setFilterGroup('')}
+                className={`px-3 py-1.5 rounded-full text-sm border transition ${
+                  filterGroup === ''
+                    ? 'bg-quest-sky text-white border-quest-sky font-bold'
+                    : 'bg-white border-gray-200 text-quest-text/70 hover:bg-sky-50'
+                }`}
+              >
+                👥 ทั้งหมด ({students.length})
+              </button>
               {groups.map((g: any) => (
                 <span
                   key={g.id}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-sky-50 border border-sky-200 text-sm"
+                  className={`inline-flex items-center rounded-full border text-sm transition ${
+                    filterGroup === g.id
+                      ? 'bg-quest-sky text-white border-quest-sky font-bold'
+                      : 'bg-white border-gray-200 text-quest-text/70'
+                  }`}
                 >
-                  📁 {g.name}
-                  <span className="text-xs text-quest-text/50">{countIn(g.id)} คน</span>
+                  <button onClick={() => setFilterGroup(filterGroup === g.id ? '' : g.id)}>
+                    📁 {g.name} ({countIn(g.id)})
+                  </button>
                   <button
                     onClick={() => removeGroup(g.id, g.name)}
-                    title="ลบห้องเรียน"
-                    className="text-red-400 hover:text-red-600 font-bold px-1"
+                    title={`ลบห้อง ${g.name}`}
+                    className={`px-2 font-bold ${
+                      filterGroup === g.id ? 'text-white/70 hover:text-white' : 'text-red-400 hover:text-red-600'
+                    }`}
                   >
                     ✕
                   </button>
                 </span>
               ))}
+              {unassigned.length > 0 && (
+                <button
+                  onClick={() => setFilterGroup(filterGroup === 'none' ? '' : 'none')}
+                  className={`px-3 py-1.5 rounded-full text-sm border transition ${
+                    filterGroup === 'none'
+                      ? 'bg-quest-sky text-white border-quest-sky font-bold'
+                      : 'bg-white border-gray-200 text-quest-text/70 hover:bg-sky-50'
+                  }`}
+                >
+                  📭 ไม่มีห้อง ({unassigned.length})
+                </button>
+              )}
             </div>
-          )}
-        </form>
+          </div>
+        )}
 
         {/* เพิ่มเป็นชุด */}
         {showBulk ? (
@@ -311,45 +385,90 @@ export default function TeacherStudentsPage() {
           </button>
         )}
 
+        {/* ค้นหา + เลือกหลายคนย้ายห้อง */}
+        {students.length > 0 && (
+          <div className="card p-4 space-y-3">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="🔍 ค้นหาชื่อนักเรียน…"
+              className="input w-full"
+            />
+            {picked.length > 0 && (
+              <div className="flex flex-col sm:flex-row gap-2 p-3 bg-sky-50 rounded-2xl">
+                <span className="text-sm font-medium self-center">เลือกแล้ว {picked.length} คน</span>
+                <select
+                  value={bulkTarget}
+                  onChange={(e) => setBulkTarget(e.target.value)}
+                  className="input flex-1"
+                >
+                  <option value="">ไม่มีห้องเรียน</option>
+                  {groups.map((g: any) => (
+                    <option key={g.id} value={g.id}>
+                      📁 {g.name}
+                    </option>
+                  ))}
+                </select>
+                <button onClick={movePicked} className="btn-primary whitespace-nowrap">
+                  ย้ายทั้งหมด
+                </button>
+                <button onClick={() => setPicked([])} className="btn-secondary whitespace-nowrap">
+                  ยกเลิก
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* รายชื่อ แบ่งตามห้องเรียน */}
         <div className="space-y-4">
-          {groups.map((g: any) => {
-            const members = students.filter((s: any) => (s.groupId || '') === g.id);
-            if (members.length === 0) return null;
+          {shownGroups.map((g: any) => {
+            const members = membersOf(g.id);
+            // ห้องว่าง: แสดงเฉพาะตอนครูกดเข้ามาดูห้องนั้น (ไม่ปุ่มรกทั้งหน้า)
+            if (members.length === 0 && filterGroup !== g.id) return null;
             return (
               <div key={g.id} className="card p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-bold">📁 {g.name}</h2>
                   <span className="text-sm text-quest-text/60">{members.length} คน</span>
                 </div>
-                <StudentRows
-                  students={members}
-                  groupById={groupById}
-                  editingId={editingId}
-                  editName={editName}
-                  editAvatar={editAvatar}
-                  editGroup={editGroup}
-                  setEditName={setEditName}
-                  setEditAvatar={setEditAvatar}
-                  setEditGroup={setEditGroup}
-                  startEdit={startEdit}
-                  saveEdit={saveEdit}
-                  cancelEdit={() => setEditingId(null)}
-                  assignGroup={assignGroup}
-                  remove={remove}
-                />
+                {members.length === 0 ? (
+                  <p className="text-center text-quest-text/60 text-sm py-4">
+                    ยังไม่มีนักเรียนในห้องนี้ — ติ๊กชื่อเด็กด้านล่าวแล้วกด &quot;ย้ายทั้งหมด&quot; เข้าห้องนี้ได้เลย
+                  </p>
+                ) : (
+                  <StudentRows
+                    students={members}
+                    groupById={groupById}
+                    editingId={editingId}
+                    editName={editName}
+                    editAvatar={editAvatar}
+                    editGroup={editGroup}
+                    setEditName={setEditName}
+                    setEditAvatar={setEditAvatar}
+                    setEditGroup={setEditGroup}
+                    startEdit={startEdit}
+                    saveEdit={saveEdit}
+                    cancelEdit={() => setEditingId(null)}
+                    assignGroup={assignGroup}
+                    remove={remove}
+                    picked={picked}
+                    togglePick={togglePick}
+                  />
+                )}
               </div>
             );
           })}
 
-          {unassigned.length > 0 && (
+          {showUnassigned && (
             <div className="card p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-bold">📭 ไม่มีห้องเรียน</h2>
-                <span className="text-sm text-quest-text/60">{unassigned.length} คน</span>
+                <span className="text-sm text-quest-text/60">{unassigned.filter(matchQuery).length} คน</span>
               </div>
               <StudentRows
-                students={unassigned}
+                students={unassigned.filter(matchQuery)}
                 groupById={groupById}
                 editingId={editingId}
                 editName={editName}
@@ -363,6 +482,8 @@ export default function TeacherStudentsPage() {
                 cancelEdit={() => setEditingId(null)}
                 assignGroup={assignGroup}
                 remove={remove}
+                picked={picked}
+                togglePick={togglePick}
               />
             </div>
           )}
@@ -374,6 +495,18 @@ export default function TeacherStudentsPage() {
               <p className="text-quest-text/60 text-sm">
                 เพิ่มรายชื่อก่อน แล้วนักเรียนจะเห็นและกดชื่อตัวเองตอนเข้าเกม
               </p>
+            </div>
+          )}
+
+          {students.length > 0 && !q && filterGroup === '' && groups.length === 0 && null}
+
+          {students.length > 0 && filterGroup === 'none' && unassigned.length === 0 && (
+            <div className="card p-6 text-center text-quest-text/60 text-sm">ทุกคนมีห้องเรียนแล้ว 🎉</div>
+          )}
+
+          {q && filterGroup === '' && !showUnassigned && shownGroups.every((g: any) => membersOf(g.id).length === 0) && (
+            <div className="card p-6 text-center text-quest-text/60 text-sm">
+              ไม่พบชื่อ &quot;{query}&quot; ในรายชื่อที่มีอยู่
             </div>
           )}
         </div>
@@ -398,6 +531,8 @@ function StudentRows({
   cancelEdit,
   assignGroup,
   remove,
+  picked = [],
+  togglePick,
 }: any) {
   return (
     <div className="space-y-2">
@@ -451,7 +586,21 @@ function StudentRows({
           );
         }
         return (
-          <div key={s.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-2xl flex-wrap">
+          <div
+            key={s.id}
+            className={`flex items-center gap-3 p-3 rounded-2xl flex-wrap ${
+              picked.includes(s.id) ? 'bg-sky-100 ring-2 ring-quest-sky' : 'bg-gray-50'
+            }`}
+          >
+            {togglePick && (
+              <input
+                type="checkbox"
+                checked={picked.includes(s.id)}
+                onChange={() => togglePick(s.id)}
+                className="w-4 h-4 shrink-0 cursor-pointer"
+                title="เลือกเพื่อย้ายห้องหลายคนพร้อมกัน"
+              />
+            )}
             <span className="text-2xl shrink-0">{s.avatar}</span>
             <div className="min-w-0 flex-1">
               <p className="font-medium truncate">{s.name}</p>
