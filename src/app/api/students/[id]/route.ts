@@ -27,6 +27,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       updates.name = String(body.name).trim();
     }
     if (body.avatar !== undefined) updates.avatar = body.avatar;
+    // ย้ายห้องเรียน ('' = ไม่มีห้อง)
+    if (body.groupId !== undefined) updates.groupId = body.groupId ? String(body.groupId) : '';
 
     const student = await updateStudent(params.id, updates);
     if (!student) {

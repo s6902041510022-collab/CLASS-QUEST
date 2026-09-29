@@ -16,6 +16,7 @@ export type DBData = {
   sessions: any[];
   teams: any[];
   teachers: any[];
+  groups: any[];
   settings: { teacherPin: string; teacherName?: string; [key: string]: any };
 };
 
@@ -27,6 +28,7 @@ const defaultData: DBData = {
   sessions: [],
   teams: [],
   teachers: [],
+  groups: [],
   settings: { teacherPin: '1234', teacherName: '' },
 };
 
@@ -438,6 +440,37 @@ export async function deleteStudent(id: string) {
   const i = db.data.students.findIndex((s: any) => s.id === id);
   if (i === -1) return false;
   db.data.students.splice(i, 1);
+  // ลบคะแนน/รอบการเล่นของคนนี้ไปด้วย (กันคะแนนค้างในเกม/รอบที่ลบชื่อไปแล้ว)
+  db.data.players = db.data.players.filter((p: any) => p.studentId !== id);
+  await db.write();
+  return true;
+}
+
+// ==================== GROUPS (ห้องเรียน/โฟลเดอร์) ====================
+
+export const getGroups = async () => (await getDb()).data.groups;
+
+export async function addGroup(name: string) {
+  const db = await getDb();
+  const trimmed = String(name).trim();
+  if (!trimmed) return null;
+  const dup = db.data.groups.find((g: any) => String(g.name).trim() === trimmed);
+  if (dup) return dup;
+  const group = { id: uuidv4(), name: trimmed, createdAt: new Date().toISOString() };
+  db.data.groups.push(group);
+  await db.write();
+  return group;
+}
+
+export async function deleteGroup(id: string) {
+  const db = await getDb();
+  const i = db.data.groups.findIndex((g: any) => g.id === id);
+  if (i === -1) return false;
+  db.data.groups.splice(i, 1);
+  // นักเรียนในห้องนั้นกลับไป "ไม่มีห้อง"
+  db.data.students.forEach((s: any) => {
+    if (s.groupId === id) s.groupId = '';
+  });
   await db.write();
   return true;
 }

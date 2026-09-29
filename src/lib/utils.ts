@@ -24,6 +24,16 @@ export function generateRoomCode(): string {
   return code;
 }
 
+/** ป้ายชื่อรอบการเล่น เช่น "รอบที่ 2 • เดอะควิซ • 28 ก.ย. 16:35 • 1339 XP • ถูก 8/8" — กันงงว่ารอบไหนเป็นรอบไหน */
+export function roundLabel(h: any): string {
+  const m = String(h.sessionId || '').match(/r(\d+)$/i);
+  const game = h.gameName || 'เกม';
+  const d = new Date(h.joinedAt);
+  const date = d.toLocaleDateString('th-TH');
+  const t = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  return `${m ? `รอบที่ ${m[1]}` : game} • ${date} ${t} • ${h.xp || 0} XP • ถูก ${h.correct ?? 0}/${h.total ?? 0}`;
+}
+
 export function formatDate(date: Date | string): string {
   return new Intl.DateTimeFormat('th-TH', {
     year: 'numeric',

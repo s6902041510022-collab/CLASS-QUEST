@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -10,10 +10,18 @@ const AVATARS = ['🦊', '🐱', '🐶', '🐰', '🐻', '🐼', '🐨', '🐯',
 export default function TeacherStudentsPage() {
   const router = useRouter();
   const [students, setStudents] = useState<any[]>([]);
+  const [groups, setGroups] = useState<any[]>([]);
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState('🦊');
   const [bulk, setBulk] = useState('');
   const [showBulk, setShowBulk] = useState(false);
+  // ชื่อห้องเรียนใหม่
+  const [newGroup, setNewGroup] = useState('');
+  // แก้ไขในบรรทัด (ไม่ใช้ prompt — ตัดปัญหา error จากกล่องโต้ตอบ)
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editAvatar, setEditAvatar] = useState('🦊');
+  const [editGroup, setEditGroup] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -28,8 +36,12 @@ export default function TeacherStudentsPage() {
 
   const load = async () => {
     try {
-      const r = await fetch('/api/students').then((x) => x.json());
-      if (r.success) setStudents(r.data || []);
+      const [s, g] = await Promise.all([
+        fetch('/api/students').then((x) => x.json()),
+        fetch('/api/groups').then((x) => x.json()),
+      ]);
+      if (s.success) setStudents(s.data || []);
+      if (g.success) setGroups(g.data || []);
     } catch {
       /* ไม่ critical */
     }
@@ -95,27 +107,86 @@ export default function TeacherStudentsPage() {
   };
 
   const remove = async (id: string, sname: string) => {
-    if (!confirm(`ลบ "${sname}" ออกจากรายชื่อ?\nผลการเล่นที่เคยบันทึกไว้จะยังอยู่`)) return;
+    if (
+      !confirm(
+        `ลบ "${sname}" ออกจากรายชื่อ?\nคะแนนและประวัติการเล่นทั้งหมดของคนนี้จะถูกลบด้วย (ย้อนกลับไม่ได้)`
+      )
+    )
+      return;
     await fetch(`/api/students/${id}`, { method: 'DELETE' });
     load();
   };
 
-  const rename = async (id: string, current: string) => {
-    const next = prompt('แก้ไขชื่อนักเรียน', current);
-    if (!next || !next.trim() || next === current) return;
+  // ===== ห้องเรียน (โฟลเดอร์) =====
+
+  const createGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGroup.trim()) {
+      setError('ใส่ชื่อห้องเรียนก่อน');
+      return;
+    }
+    setError('');
+    const r = await fetch('/api/groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newGroup.trim() }),
+    }).then((x) => x.json());
+    if (r.success) {
+      setNewGroup('');
+      load();
+    } else {
+      setError(r.error || 'สร้างห้องเรียนไม่สำเร็จ');
+    }
+  };
+
+  const removeGroup = async (id: string, gname: string) => {
+    if (!confirm(`ลบห้องเรียน "${gname}"?\nนักเรียนในห้องจะกลับไป "ไม่มีห้องเรียน" (ชื่อยังอยู่)`)) return;
+    await fetch(`/api/groups?id=${id}`, { method: 'DELETE' });
+    load();
+  };
+
+  const assignGroup = async (id: string, groupId: string) => {
     await fetch(`/api/students/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: next.trim() }),
+      body: JSON.stringify({ groupId }),
     });
     load();
   };
+
+  // ===== แก้ไขในบรรทัด =====
+
+  const startEdit = (s: any) => {
+    setEditingId(s.id);
+    setEditName(s.name);
+    setEditAvatar(s.avatar || '🦊');
+    setEditGroup(s.groupId || '');
+  };
+
+  const saveEdit = async (id: string) => {
+    if (!editName.trim()) {
+      setError('ชื่อห้ามว่าง');
+      return;
+    }
+    setError('');
+    await fetch(`/api/students/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: editName.trim(), avatar: editAvatar, groupId: editGroup }),
+    });
+    setEditingId(null);
+    load();
+  };
+
+  const groupById = new Map(groups.map((g: any) => [g.id, g]));
+  const countIn = (gid: string) => students.filter((s: any) => (s.groupId || '') === gid).length;
+  const unassigned = students.filter((s: any) => !s.groupId);
 
   return (
     <div className="min-h-screen bg-gray-50">
       <TeacherHeader
         title="รายชื่อนักเรียน"
-        subtitle={`${students.length} คน — นักเรียนจะเห็นรายชื่อนี้ตอนเข้าเกม`}
+        subtitle={`${students.length} คน • ${groups.length} ห้องเรียน — นักเรียนจะเห็นรายชื่อนี้ตอนเข้าเกม`}
         backHref="/teacher/dashboard"
       />
 
@@ -159,6 +230,54 @@ export default function TeacherStudentsPage() {
           {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
         </form>
 
+        {/* สร้างห้องเรียน (โฟลเดอร์) */}
+        <form onSubmit={createGroup} className="card p-6">
+          <h2 className="text-lg font-bold mb-1">🏫 สร้างห้องเรียน (โฟลเดอร์)</h2>
+          <p className="text-sm text-quest-text/60 mb-4">
+            ตั้งชื่อเอง เช่น &quot;ป.4/1&quot;, &quot;ห้อง A&quot; — เอาไว้แยกกลุ่มนักเรียน / จัดรายชื่อเป็นสัดส่วน
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="text"
+              maxLength={30}
+              value={newGroup}
+              onChange={(e) => {
+                setNewGroup(e.target.value);
+                setError('');
+              }}
+              placeholder="ชื่อห้องเรียน เช่น ป.4/1"
+              className="input flex-1"
+            />
+            <button
+              type="submit"
+              disabled={!newGroup.trim() || loading}
+              className="btn-secondary whitespace-nowrap disabled:opacity-50"
+            >
+              📁 + สร้างห้อง
+            </button>
+          </div>
+          {groups.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-4">
+              {groups.map((g: any) => (
+                <span
+                  key={g.id}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-sky-50 border border-sky-200 text-sm"
+                >
+                  📁 {g.name}
+                  <span className="text-xs text-quest-text/50">{countIn(g.id)} คน</span>
+                  <button
+                    onClick={() => removeGroup(g.id, g.name)}
+                    title="ลบห้องเรียน"
+                    className="text-red-400 hover:text-red-600 font-bold px-1"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </form>
+
         {/* เพิ่มเป็นชุด */}
         {showBulk ? (
           <form onSubmit={addBulk} className="card p-6">
@@ -192,54 +311,69 @@ export default function TeacherStudentsPage() {
           </button>
         )}
 
-        {/* รายชื่อ */}
-        <div className="card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold">รายชื่อทั้งหมด</h2>
-            <span className="text-sm text-quest-text/60">{students.length} คน</span>
-          </div>
+        {/* รายชื่อ แบ่งตามห้องเรียน */}
+        <div className="space-y-4">
+          {groups.map((g: any) => {
+            const members = students.filter((s: any) => (s.groupId || '') === g.id);
+            if (members.length === 0) return null;
+            return (
+              <div key={g.id} className="card p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-bold">📁 {g.name}</h2>
+                  <span className="text-sm text-quest-text/60">{members.length} คน</span>
+                </div>
+                <StudentRows
+                  students={members}
+                  groupById={groupById}
+                  editingId={editingId}
+                  editName={editName}
+                  editAvatar={editAvatar}
+                  editGroup={editGroup}
+                  setEditName={setEditName}
+                  setEditAvatar={setEditAvatar}
+                  setEditGroup={setEditGroup}
+                  startEdit={startEdit}
+                  saveEdit={saveEdit}
+                  cancelEdit={() => setEditingId(null)}
+                  assignGroup={assignGroup}
+                  remove={remove}
+                />
+              </div>
+            );
+          })}
 
-          {students.length === 0 ? (
-            <div className="text-center py-10">
+          {unassigned.length > 0 && (
+            <div className="card p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold">📭 ไม่มีห้องเรียน</h2>
+                <span className="text-sm text-quest-text/60">{unassigned.length} คน</span>
+              </div>
+              <StudentRows
+                students={unassigned}
+                groupById={groupById}
+                editingId={editingId}
+                editName={editName}
+                editAvatar={editAvatar}
+                editGroup={editGroup}
+                setEditName={setEditName}
+                setEditAvatar={setEditAvatar}
+                setEditGroup={setEditGroup}
+                startEdit={startEdit}
+                saveEdit={saveEdit}
+                cancelEdit={() => setEditingId(null)}
+                assignGroup={assignGroup}
+                remove={remove}
+              />
+            </div>
+          )}
+
+          {students.length === 0 && (
+            <div className="card p-8 text-center">
               <div className="text-5xl mb-3">📋</div>
               <p className="text-quest-text/60 mb-1">ยังไม่มีรายชื่อนักเรียน</p>
               <p className="text-quest-text/60 text-sm">
                 เพิ่มรายชื่อก่อน แล้วนักเรียนจะเห็นและกดชื่อตัวเองตอนเข้าเกม
               </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {students.map((s, i) => (
-                <div
-                  key={s.id}
-                  className="flex items-center gap-3 p-3 bg-gray-50 rounded-2xl"
-                >
-                  <span className="text-xs font-bold text-quest-text/30 w-5 shrink-0">
-                    {i + 1}
-                  </span>
-                  <span className="text-2xl shrink-0">{s.avatar}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium truncate">{s.name}</p>
-                    <p className="text-xs text-quest-text/60">
-                      {s.gamesPlayed > 0
-                        ? `เล่นไป ${s.gamesPlayed} ครั้ง • ${s.totalXp || 0} XP • ถูก ${s.correctAnswers || 0}/${s.totalAnswers || 0}`
-                        : 'ยังไม่ได้เล่น'}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => rename(s.id, s.name)}
-                    className="px-2 py-1 rounded-xl text-xs bg-white hover:bg-sky-50 text-quest-text/70 shrink-0"
-                  >
-                    แก้
-                  </button>
-                  <button
-                    onClick={() => remove(s.id, s.name)}
-                    className="px-2 py-1 rounded-xl text-xs bg-white hover:bg-red-50 text-red-500 shrink-0"
-                  >
-                    ลบ
-                  </button>
-                </div>
-              ))}
             </div>
           )}
         </div>
@@ -247,3 +381,116 @@ export default function TeacherStudentsPage() {
     </div>
   );
 }
+
+// แถวนักเรียน: แสดง / แก้ไขในบรรทัด / เลือกห้อง / ลบ
+function StudentRows({
+  students,
+  groupById,
+  editingId,
+  editName,
+  editAvatar,
+  editGroup,
+  setEditName,
+  setEditAvatar,
+  setEditGroup,
+  startEdit,
+  saveEdit,
+  cancelEdit,
+  assignGroup,
+  remove,
+}: any) {
+  return (
+    <div className="space-y-2">
+      {students.map((s: any) => {
+        const isEditing = editingId === s.id;
+        if (isEditing) {
+          return (
+            <div
+              key={s.id}
+              className="flex items-center gap-3 p-3 bg-sky-50 rounded-2xl border border-sky-200 flex-wrap"
+            >
+              <select
+                value={editAvatar}
+                onChange={(e) => setEditAvatar(e.target.value)}
+                className="input w-16 text-center text-xl"
+              >
+                {['🦊', '🐱', '🐶', '🐰', '🐻', '🐼', '🐨', '🐯', '🦁', '🐸', '🐵', '🐔'].map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                maxLength={30}
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="input flex-1 min-w-[140px]"
+              />
+              <select
+                value={editGroup}
+                onChange={(e) => setEditGroup(e.target.value)}
+                className="input w-auto"
+              >
+                <option value="">ไม่มีห้องเรียน</option>
+                {[...groupById.values()].map((g: any) => (
+                  <option key={g.id} value={g.id}>
+                    📁 {g.name}
+                  </option>
+                ))}
+              </select>
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => saveEdit(s.id)} className="px-3 py-1.5 rounded-xl text-xs bg-quest-sky text-white">
+                  💾 บันทึก
+                </button>
+                <button onClick={cancelEdit} className="px-3 py-1.5 rounded-xl text-xs bg-white hover:bg-gray-100 text-quest-text/70">
+                  ยกเลิก
+                </button>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div key={s.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-2xl flex-wrap">
+            <span className="text-2xl shrink-0">{s.avatar}</span>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium truncate">{s.name}</p>
+              <p className="text-xs text-quest-text/60">
+                {s.gamesPlayed > 0
+                  ? `เล่นไป ${s.gamesPlayed} ครั้ง • ${s.totalXp || 0} XP • ถูก ${s.correctAnswers || 0}/${s.totalAnswers || 0}`
+                  : 'ยังไม่ได้เล่น'}
+              </p>
+            </div>
+            <select
+              value={s.groupId || ''}
+              onChange={(e) => assignGroup(s.id, e.target.value)}
+              className="input w-auto text-sm"
+              title="ย้ายห้องเรียน"
+            >
+              <option value="">ไม่มีห้อง</option>
+              {[...groupById.values()].map((g: any) => (
+                <option key={g.id} value={g.id}>
+                  📁 {g.name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => startEdit(s)}
+              className="px-2 py-1 rounded-xl text-xs bg-white hover:bg-sky-50 text-quest-text/70 shrink-0"
+            >
+              แก้
+            </button>
+            <button
+              onClick={() => remove(s.id, s.name)}
+              className="px-2 py-1 rounded-xl text-xs bg-white hover:bg-red-50 text-red-500 shrink-0"
+            >
+              ลบ
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
