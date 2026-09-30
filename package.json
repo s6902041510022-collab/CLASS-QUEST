@@ -15,7 +15,8 @@
     "seed": "node data/seed-all.mjs",
     "seed:kv": "node data/seed-kv.mjs",
     "seed:firestore": "node data/seed-firestore.mjs",
-    "db:upload:firestore": "node data/seed-firestore.mjs"
+    "db:upload:firestore": "node data/seed-firestore.mjs",
+    "serve:public": "node scripts/serve-public.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.0",
