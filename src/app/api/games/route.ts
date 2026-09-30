@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
 import { createGame, getAllGames, getGame, updateGame, deleteGame } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // GET all games
 export async function GET() {
   try {
     const games = await getAllGames();
     return NextResponse.json({ success: true, data: games });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch games' },
+      { success: false, error: errorMessage(err, 'Failed to fetch games') },
       { status: 500 }
     );
   }
@@ -20,9 +21,9 @@ export async function POST(request: Request) {
     const data = await request.json();
     const game = await createGame(data);
     return NextResponse.json({ success: true, data: game }, { status: 201 });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to create game' },
+      { success: false, error: errorMessage(err, 'Failed to create game') },
       { status: 500 }
     );
   }

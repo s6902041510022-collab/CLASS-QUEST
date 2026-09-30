@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyPin, getTeacher, saveTeacher, getSettings } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // POST เข้าสู่ระบบครู — ตรวจ PIN แล้วตั้ง/อัปเดตชื่อครู
 export async function POST(request: Request) {
@@ -28,8 +29,8 @@ export async function POST(request: Request) {
 
     const teacher = await saveTeacher({ name: teacherName, avatar: avatar || existing.avatar });
     return NextResponse.json({ success: true, data: teacher });
-  } catch {
-    return NextResponse.json({ success: false, error: 'เข้าสู่ระบบไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'เข้าสู่ระบบไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -42,8 +43,8 @@ export async function GET() {
       success: true,
       data: { ...teacher, hasPin: Boolean(settings.teacherPin) },
     });
-  } catch {
-    return NextResponse.json({ success: false, error: 'โหลดข้อมูลไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'โหลดข้อมูลไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -56,8 +57,8 @@ export async function PUT(request: Request) {
     }
     const teacher = await saveTeacher({ name, avatar });
     return NextResponse.json({ success: true, data: teacher });
-  } catch {
-    return NextResponse.json({ success: false, error: 'บันทึกไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'บันทึกไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -78,7 +79,7 @@ export async function PATCH(request: Request) {
     const { updateSettings } = await import('@/lib/db');
     const settings = await updateSettings({ teacherPin: String(newPin) });
     return NextResponse.json({ success: true, data: { ok: true, pin: settings.teacherPin } });
-  } catch {
-    return NextResponse.json({ success: false, error: 'เปลี่ยน PIN ไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'เปลี่ยน PIN ไม่สำเร็จ') }, { status: 500 });
   }
 }

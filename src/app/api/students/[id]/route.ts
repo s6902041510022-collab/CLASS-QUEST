@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getStudent, updateStudent, deleteStudent, getStudentHistory } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // GET โปรไฟล์ + ประวัติการเล่นของนักเรียนคนนี้
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
@@ -10,8 +11,8 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     }
     const history = await getStudentHistory(params.id);
     return NextResponse.json({ success: true, data: student, history });
-  } catch {
-    return NextResponse.json({ success: false, error: 'โหลดข้อมูลไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'โหลดข้อมูลไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -35,8 +36,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       return NextResponse.json({ success: false, error: 'ไม่พบนักเรียน' }, { status: 404 });
     }
     return NextResponse.json({ success: true, data: student });
-  } catch {
-    return NextResponse.json({ success: false, error: 'บันทึกไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'บันทึกไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -45,7 +46,7 @@ export async function DELETE(_request: Request, { params }: { params: { id: stri
   try {
     const ok = await deleteStudent(params.id);
     return NextResponse.json({ success: ok });
-  } catch {
-    return NextResponse.json({ success: false, error: 'ลบไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'ลบไม่สำเร็จ') }, { status: 500 });
   }
 }

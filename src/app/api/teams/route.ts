@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createTeams, getTeams } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // GET teams by gameId
 export async function GET(request: Request) {
@@ -16,9 +17,9 @@ export async function GET(request: Request) {
 
     const teams = await getTeams(gameId);
     return NextResponse.json({ success: true, data: teams });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch teams' },
+      { success: false, error: errorMessage(err, 'Failed to fetch teams') },
       { status: 500 }
     );
   }
@@ -30,9 +31,9 @@ export async function POST(request: Request) {
     const { gameId, count } = await request.json();
     const teams = await createTeams(gameId, count);
     return NextResponse.json({ success: true, data: teams }, { status: 201 });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to create teams' },
+      { success: false, error: errorMessage(err, 'Failed to create teams') },
       { status: 500 }
     );
   }

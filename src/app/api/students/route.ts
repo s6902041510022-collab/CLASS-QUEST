@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getStudents, getStudent, addStudent } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 export async function GET() {
   try {
     return NextResponse.json({ success: true, data: await getStudents() });
-  } catch {
-    return NextResponse.json({ success: false, error: 'โหลดรายชื่อไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'โหลดรายชื่อไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
     }
     const student = await addStudent(String(name), avatar);
     return NextResponse.json({ success: true, data: student }, { status: 201 });
-  } catch {
-    return NextResponse.json({ success: false, error: 'เพิ่มรายชื่อไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'เพิ่มรายชื่อไม่สำเร็จ') }, { status: 500 });
   }
 }

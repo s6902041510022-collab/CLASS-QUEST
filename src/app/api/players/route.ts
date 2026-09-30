@@ -8,6 +8,7 @@ import {
   updateStudent,
   getDb,
 } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // GET ผู้เล่นในห้อง (รอบปัจจุบัน) หรือระบุ id เพื่อเอารายเดียว (แก้ไขโหมด self-paced)
 export async function GET(request: Request) {
@@ -26,8 +27,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: 'gameId is required' }, { status: 400 });
     }
     return NextResponse.json({ success: true, data: await getPlayers(gameId) });
-  } catch {
-    return NextResponse.json({ success: false, error: 'โหลดผู้เล่นไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'โหลดผู้เล่นไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -64,7 +65,7 @@ export async function POST(request: Request) {
     await updateStudent(student.id, {});
 
     return NextResponse.json({ success: true, data: player }, { status: 201 });
-  } catch {
-    return NextResponse.json({ success: false, error: 'เข้าร่วมห้องไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'เข้าร่วมห้องไม่สำเร็จ') }, { status: 500 });
   }
 }

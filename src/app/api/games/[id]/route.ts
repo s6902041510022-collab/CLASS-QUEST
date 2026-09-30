@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getGame, updateGame, deleteGame } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // GET single game
 export async function GET(
@@ -15,9 +16,9 @@ export async function GET(
       );
     }
     return NextResponse.json({ success: true, data: game });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch game' },
+      { success: false, error: errorMessage(err, 'Failed to fetch game') },
       { status: 500 }
     );
   }
@@ -38,9 +39,9 @@ export async function PUT(
       );
     }
     return NextResponse.json({ success: true, data: game });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to update game' },
+      { success: false, error: errorMessage(err, 'Failed to update game') },
       { status: 500 }
     );
   }
@@ -60,9 +61,9 @@ export async function DELETE(
       );
     }
     return NextResponse.json({ success: true, message: 'Game deleted' });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to delete game' },
+      { success: false, error: errorMessage(err, 'Failed to delete game') },
       { status: 500 }
     );
   }

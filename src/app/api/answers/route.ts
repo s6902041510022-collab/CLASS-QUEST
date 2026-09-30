@@ -13,6 +13,7 @@ import {
 } from '@/lib/db';
 import { BOSS_DAMAGE_PER_CORRECT, BONUS_MAX_XP } from '@/lib/utils';
 import { questionToTask, gradeTask } from '@/lib/mission-tasks';
+import { errorMessage } from '@/lib/api-error';
 
 // POST บันทึกคำตอบ 1 ข้อ (เขียนข้อมูลทั้งหมดในรอบเดียว เพื่อกันเขียนซ้อนแล้วข้อมูลหาย)
 export async function POST(request: Request) {
@@ -182,8 +183,8 @@ export async function POST(request: Request) {
         bossDone: Boolean(player.bossDone),
       },
     });
-  } catch {
-    return NextResponse.json({ success: false, error: 'บันทึกคำตอบไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'บันทึกคำตอบไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -201,7 +202,7 @@ export async function PUT(request: Request) {
     }
     await rollUp(player.studentId, session.id, player);
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ success: false, error: 'บันทึกผลไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'บันทึกผลไม่สำเร็จ') }, { status: 500 });
   }
 }

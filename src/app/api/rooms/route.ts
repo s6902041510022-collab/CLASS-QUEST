@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getGameByRoomCode } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // GET game by room code
 export async function GET(request: Request) {
@@ -24,9 +25,9 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({ success: true, data: game });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch room' },
+      { success: false, error: errorMessage(err, 'Failed to fetch room') },
       { status: 500 }
     );
   }

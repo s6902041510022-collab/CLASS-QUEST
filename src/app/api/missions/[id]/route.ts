@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getMission, updateMission, deleteMission } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // GET single mission
 export async function GET(
@@ -15,9 +16,9 @@ export async function GET(
       );
     }
     return NextResponse.json({ success: true, data: mission });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch mission' },
+      { success: false, error: errorMessage(err, 'Failed to fetch mission') },
       { status: 500 }
     );
   }
@@ -38,9 +39,9 @@ export async function PUT(
       );
     }
     return NextResponse.json({ success: true, data: mission });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to update mission' },
+      { success: false, error: errorMessage(err, 'Failed to update mission') },
       { status: 500 }
     );
   }
@@ -60,9 +61,9 @@ export async function DELETE(
       );
     }
     return NextResponse.json({ success: true, message: 'Mission deleted' });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to delete mission' },
+      { success: false, error: errorMessage(err, 'Failed to delete mission') },
       { status: 500 }
     );
   }

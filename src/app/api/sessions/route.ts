@@ -7,6 +7,7 @@ import {
   rollUp,
   settleBossDefeat,
 } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 export async function GET(request: Request) {
   try {
@@ -17,8 +18,8 @@ export async function GET(request: Request) {
     // โอกาสสุดท้ายให้ "บอสที่ตายแล้ว" ปิดรอบเมื่อเลยช่วงลมจับ (ครู/นักเรียน poll มาเรื่อยๆ)
     await settleBossDefeat(gameId);
     return NextResponse.json({ success: true, data: await getSession(gameId) });
-  } catch {
-    return NextResponse.json({ success: false, error: 'โหลดสถานะไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'โหลดสถานะไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -31,8 +32,8 @@ export async function POST(request: Request) {
     // force = true คือครูกดเริ่มรอบใหม่ (ล้างผู้เล่นเก่า) ไม่ระบุ = ใช้ห้องที่ยังเปิดอยู่
     const session = await createSession(gameId, { force: Boolean(force) });
     return NextResponse.json({ success: true, data: session }, { status: 201 });
-  } catch {
-    return NextResponse.json({ success: false, error: 'เริ่มเกมไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'เริ่มเกมไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -55,7 +56,7 @@ export async function PUT(request: Request) {
       }
     }
     return NextResponse.json({ success: true, data: session });
-  } catch {
-    return NextResponse.json({ success: false, error: 'ทำรายการไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'ทำรายการไม่สำเร็จ') }, { status: 500 });
   }
 }

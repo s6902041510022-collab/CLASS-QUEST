@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, advancePlayerPosition } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // POST /api/players/advance → เลื่อนนักเรียนไปข้อถัดไป (ใช้ตอนตอบผิดกด "ไปข้อถัดไป" หรือหมดเวลา)
 // ตอบถูกจะเลื่อนให้อัตโนมัติใน /api/answers แล้ว
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
         bossDone: Boolean(player.bossDone),
       },
     });
-  } catch {
-    return NextResponse.json({ success: false, error: 'เลื่อนข้อไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'เลื่อนข้อไม่สำเร็จ') }, { status: 500 });
   }
 }

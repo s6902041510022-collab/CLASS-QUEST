@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getGroups, addGroup, deleteGroup } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // GET รายการห้องเรียน (โฟลเดอร์) + จำนวนนักเรียนในแต่ละห้อง
 export async function GET() {
   try {
     const groups = await getGroups();
     return NextResponse.json({ success: true, data: groups });
-  } catch {
-    return NextResponse.json({ success: false, error: 'โหลดห้องเรียนไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'โหลดห้องเรียนไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -21,8 +22,8 @@ export async function POST(request: Request) {
     }
     const group = await addGroup(name);
     return NextResponse.json({ success: true, data: group });
-  } catch {
-    return NextResponse.json({ success: false, error: 'สร้างห้องเรียนไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'สร้างห้องเรียนไม่สำเร็จ') }, { status: 500 });
   }
 }
 
@@ -38,7 +39,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ success: false, error: 'ไม่พบห้องเรียน' }, { status: 404 });
     }
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ success: false, error: 'ลบห้องเรียนไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'ลบห้องเรียนไม่สำเร็จ') }, { status: 500 });
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPlayer, updatePlayer, getDb } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // GET single player
 export async function GET(
@@ -15,9 +16,9 @@ export async function GET(
       );
     }
     return NextResponse.json({ success: true, data: player });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch player' },
+      { success: false, error: errorMessage(err, 'Failed to fetch player') },
       { status: 500 }
     );
   }
@@ -38,9 +39,9 @@ export async function PUT(
       );
     }
     return NextResponse.json({ success: true, data: player });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to update player' },
+      { success: false, error: errorMessage(err, 'Failed to update player') },
       { status: 500 }
     );
   }
@@ -102,9 +103,9 @@ export async function DELETE(
     db.data.players.splice(i, 1);
     await db.write();
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'ลบไม่สำเร็จ' },
+      { success: false, error: errorMessage(err, 'ลบไม่สำเร็จ') },
       { status: 500 }
     );
   }

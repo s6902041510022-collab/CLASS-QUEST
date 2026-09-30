@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb, getGame, getMissions, getAllPlayers, getStudents, getSessions } from '@/lib/db';
 import { questionToTask, answerLabel, correctLabel } from '@/lib/mission-tasks';
+import { errorMessage } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -112,8 +113,8 @@ export async function GET(request: Request) {
         },
       },
     });
-  } catch {
-    return NextResponse.json({ success: false, error: 'วิเคราะห์ข้อมูลไม่สำเร็จ' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: errorMessage(err, 'วิเคราะห์ข้อมูลไม่สำเร็จ') }, { status: 500 });
   }
 }
 

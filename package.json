@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "next lint",
     "check": "node scripts/check.mjs",
-    "test": "node --test",
+    "test": "node --import ./scripts/register-ts.mjs --test",
     "seed": "node data/seed-all.mjs"
   },
   "dependencies": {

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createMission, getMissions } from '@/lib/db';
+import { errorMessage } from '@/lib/api-error';
 
 // GET missions by gameId
 export async function GET(request: Request) {
@@ -16,9 +17,9 @@ export async function GET(request: Request) {
 
     const missions = await getMissions(gameId);
     return NextResponse.json({ success: true, data: missions });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch missions' },
+      { success: false, error: errorMessage(err, 'Failed to fetch missions') },
       { status: 500 }
     );
   }
@@ -30,9 +31,9 @@ export async function POST(request: Request) {
     const data = await request.json();
     const mission = await createMission(data);
     return NextResponse.json({ success: true, data: mission }, { status: 201 });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { success: false, error: 'Failed to create mission' },
+      { success: false, error: errorMessage(err, 'Failed to create mission') },
       { status: 500 }
     );
   }
