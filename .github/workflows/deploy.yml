@@ -1,0 +1,56 @@
+name: Deploy (mirror)
+
+# กรณีที่ต้องการให้ runner ดึง/ดันโค้ดผ่าน SSH
+#
+# ข้อควรรู้เรื่อง deploy key:
+#   - ถ้าจะ push กลับมาที่ repo นี้ ไม่ต้องใช้ key เลย ใช้ GITHUB_TOKEN (สิทธิ์
+#     contents: write) พอ และจะดันเข้า branch ที่กำลังรันอยู่ก็ไม่ได้อยู่แล้ว
+#   - deploy key มีค่าเมื่อต้องดันไปยัง repo อื่น (เช่น repo สำรอง/สมาธิก) เพราะ
+#     GITHUB_TOKEN ของ repo นี้เอาไปใช้กับ repo อื่นไม่ได้
+#   - key ที่ใส่ไว้ต้องถูกเพิ่มเป็น deploy key ใน repo ปลายทางด้วย
+#     (github.com/<ปลายทาง>/settings/keys แบบ Write ถ้าจะ push)
+#
+# เริ่มใช้: Actions -> Deploy (mirror) -> Run workflow -> ใส่ค่าในช่อง mirror
+
+on:
+  workflow_dispatch:
+    inputs:
+      mirror:
+        description: 'ปลายทางแบบ SSH เช่น git@github.com:user/CLASS-QUEST-mirror.git (เว้นว่าง = ข้าม)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  mirror:
+    name: ดัน commit ไปยัง repo สำรอง
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 = เอาประวัติทั้งหมดมา ไม่งั้น push แล้ว repo ปลายทางจะได้ประวัติขาด
+          fetch-depth: 0
+
+      - name: ใส่ deploy key
+        if: ${{ inputs.mirror != '' }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' '${{ secrets.CQ_DEPLOY_KEY }}' > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # กัน host key ไม่ให้ prompt ตอน push
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: ดันไปยัง ${{ inputs.mirror }}
+        if: ${{ inputs.mirror != '' }}
+        env:
+          MIRROR: ${{ inputs.mirror }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git remote add mirror "$MIRROR"
+          git push mirror HEAD:main
+
+      - name: ข้าม เพราะไม่ได้ใส่ปลายทาง
+        if: ${{ inputs.mirror == '' }}
+        run: echo 'ไม่ได้ใส่ค่าในช่อง mirror — ไม่มีอะไรต้องทำ'

@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# push เข้า branch เดิมอีกครั้ง -> ยกเลิกรอบเก่า (ไม่ต้องเสีย runner รอผลที่ไม่มีใครสนใจ)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: tsc + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: ติดตั้ง dependencies
+        run: npm ci
+
+      # check.mjs รัน tsc --noemit แล้ว next build ไปโฟลเดอร์ .next-check
+      # (แยกจาก .next เพื่อไม่ไปกวน dev server ที่อาจรันคู่กันอยู่)
+      - name: ตรวจ type และ build
+        run: npm run check
+
+  test:
+    name: เทสต์ (unit + e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: ติดตั้ง dependencies
+        run: npm ci
+
+      # เทสต์ e2e ยิง http://localhost:3000 (BASE ใน scripts/e2e-*.test.mjs)
+      # จึงต้องเปิด dev server ก่อน
+      #
+      # เปิด server แล้วรันเทสต์ใน step เดียวกัน เพราะ runner จะปิด process
+      # ที่ค้างไว้เมื่อจบ job
+      - name: เปิด dev server แล้วรันเทสต์
+        run: |
+          npm run dev > /tmp/dev.log 2>&1 &
+
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/api/games > /dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::dev server ไม่ตอบภายใน 120 วินาที"
+            cat /tmp/dev.log
+            exit 1
+          fi
+
+          echo "dev server พร้อมแล้ว — เริ่มรันเทสต์"
+          npm test
+
+      # ถ้าเทสต์พัง มักเป็นเพราะ server ไม่ได้ตอบตามที่คาด
+      # log ของ server คือหลักฐานเดียวที่ช่วยได้
+      - name: แสดง log ของ dev server
+        if: failure()
+        run: tail -n 200 /tmp/dev.log
