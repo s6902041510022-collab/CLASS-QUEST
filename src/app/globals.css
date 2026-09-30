@@ -119,6 +119,19 @@
   animation: xp-popup 1.5s ease-out forwards;
 }
 
+/* ตัวเลขคะแนนสะสมขยับเมื่อเพิ่ม
+   ต่างจาก xp-popup ตรงที่ "นิ่ง" ท้ายสุด ไม่หาย — เป็นตัวเลขหลักบนจอ
+   ใช้ key={totalXp} เพื่อให้ React สร้างใหม่แล้วเริ่มแอนิเมชันใหม่ทุกครั้งที่คะแนนเปลี่ยน */
+@keyframes xp-bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+
+.animate-xp-bump {
+  animation: xp-bump 420ms ease-out;
+}
+
 /* Boss Hit Animation */
 @keyframes boss-hit {
   0% { transform: scale(1); }

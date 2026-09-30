@@ -31,6 +31,7 @@ import {
   unauthorized,
   notFound,
 } from '@/lib/auth-server';
+import { getOwnedGame } from '@/lib/db';
 import { errorMessage } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -48,21 +49,31 @@ export async function GET(request: Request) {
       if (me && me.id === singleId) {
         return NextResponse.json({ success: true, data: me });
       }
-      if (!account) return unauthorized();
-      const player = await getPlayer(singleId);
-      if (!player) return notFound();
-      const owned = await requireOwnedGame(player.gameId);
-      if (owned instanceof NextResponse) return owned;
-      return NextResponse.json({ success: true, data: player });
+      // ครู: ต้องเป็นเจ้าของเกมที่ผู้เล่นคนนั้นอยู่ (ไม่ใช่แค่ "มีคุกกี้ครู")
+      if (account) {
+        const player = await getPlayer(singleId);
+        if (!player) return notFound();
+        const owned = player.gameId ? await getOwnedGame(player.gameId, account.id) : null;
+        if (!owned) return notFound();
+        return NextResponse.json({ success: true, data: player });
+      }
+      return unauthorized();
     }
 
     const gameId = url.searchParams.get('gameId') || undefined;
 
     // ครู: ต้องเป็นเจ้าของเกม
+    //
+    // ⚠️ ต้องเช็ค "เป็นเจ้าของจริงไหม" ไม่ใช่แค่ "มีคุกกี้ครูไหม"
+    //    ครูที่ล็อกอินค้างไว้ (ทดสอบหน้านักเรียนบนเครื่องตัวเอง หรือเครื่องคลาสที่ครูคนอื่นล็อกอินไว้)
+    //    เดิมติด requireOwnedGame → ได้ 404 → หน้าล็อบี้มองเป็น "ยังไม่มีใครเข้าร่วม"
+    //    นักเรียนที่เพิ่งเข้าห้องจริง ๆ ก็เลยหายไปจากหน้าจอ
     if (account) {
-      const owned = await requireOwnedGame(gameId);
-      if (owned instanceof NextResponse) return owned;
-      return NextResponse.json({ success: true, data: await getPlayers(gameId!) });
+      const owned = gameId ? await getOwnedGame(gameId, account.id) : null;
+      if (owned) {
+        return NextResponse.json({ success: true, data: await getPlayers(gameId!) });
+      }
+      // ไม่ใช่เกมของครูคนนี้ → ตกไปลองทางนักเรียนต่อ (ต้องมีคุกกี้ผู้เล่นในห้องนั้นจริง)
     }
 
     // นักเรียน: ต้องอยู่ในห้องนั้นจริง
@@ -101,8 +112,18 @@ export async function POST(request: Request) {
       );
     }
 
+    // 🔑 จุดที่ทำให้นักเรียนหลุดไปหน้าผลวิเคราะห์ทันทีที่เลือกชื่อ
+    //    getSession คืน "รอบล่าสุด" แม้ที่รอบนั้นปิดไปแล้ว → นักเรียนที่เพิ่งเข้ามา
+    //    ถูกผนวกเข้ากับรอบที่จบแล้ว แล้วหน้าล็อบี้ก็เห็น status = 'completed'
+    //    แล้วพาไปหน้าผลวิเคราะห์ทันที ทั้งที่ยังไม่ได้เล่นสักข้อ
+    //    (แก้ชื่อแล้วเข้าใหม่ก็โดนอีก เพราะรอบเก่ายังค้างสถานะ completed อยู่)
+    //    แก้โดย: รอบที่ปิดแล้วต้องเปิดห้องรอใหม่เสมอ ไม่งั้นคนเพิ่งมาจะติดรอบตาย
     let session = await getSession(gameId);
-    if (!session) session = await createSession(gameId);
+    if (!session || session.status === 'completed') {
+      // ไม่ใส่ force: ถ้ามีนักเรียนคนที่สองเข้าตามมา ให้เข้าห้องรอเดียวกัน
+      // (createSession คืนรอบที่ยังเปิดอยู่ถ้ามี จะได้ไม่เพิ่มรอบเปล่า ๆ)
+      session = await createSession(gameId);
+    }
 
     // เข้าห้องเดิมแล้ว → ไม่สร้างซ้ำ
     const existing = (await getPlayers(gameId)).find((p: any) => p.studentId === student.id);

@@ -72,17 +72,17 @@ const DECLARED = {
     },
   },
   'games/[id]/route.ts': {
-    note: 'เกมเดียว — ต้องเช็คว่าเป็นของเรา ไม่ใช่แค่ล็อกอิน',
+    note: 'เกมเดียว — GET เปิดให้นักเรียนที่อยู่ในห้องด้วย (requireGameViewer ตรวจทั้งเจ้าของและผู้เล่นในเกม) แต่ต้องตัด ownerId ทิ้ง; PUT/DELETE เฉพาะเจ้าของ',
     methods: {
-      GET: { guards: ['requireOwnedGame'] },
+      GET: { guards: ['requireGameViewer'], alsoCalls: ['publicGame'] },
       PUT: { guards: ['requireOwnedGame'] },
       DELETE: { guards: ['requireOwnedGame'] },
     },
   },
   'missions/route.ts': {
-    note: 'ด่านของเกม — ผูกกับเจ้าของเกม',
+    note: 'ด่านของเกม — GET เปิดให้นักเรียนในห้อง แต่ต้องตัด correctAnswer (publicMissions) ไม่งั้นอ่านเฉลยจาก DevTools ได้ก่อนเล่น; POST เฉพาะเจ้าของ',
     methods: {
-      GET: { guards: ['requireOwnedGame'] },
+      GET: { guards: ['requireGameViewer'], alsoCalls: ['publicMissions'] },
       POST: { guards: ['requireOwnedGame'] },
     },
   },
@@ -95,16 +95,16 @@ const DECLARED = {
     },
   },
   'students/route.ts': {
-    note: 'รายชื่อนักเรียนของครู — ต้องจำกัดที่เจ้าของ',
+    note: 'รายชื่อนักเรียน — ครูดูของตัวเองได้ด้วย getCurrentAccount; นักเรียนยังไม่มีบัญชี จึงยืนยันด้วย requireRoomCode (รหัสห้องต้องตรงกับ gameId) แล้วเขียนลงเจ้าของเกมนั้น',
     methods: {
-      GET: { guards: ['requireAccount'] },
-      POST: { guards: ['requireAccount'] },
+      GET: { guards: ['getCurrentAccount', 'requireRoomCode'] },
+      POST: { guards: ['getCurrentAccount', 'requireRoomCode'] },
     },
   },
   'students/[id]/route.ts': {
-    note: 'นักเรียนเดียว — getStudent(id, ownerId) กรองให้เหลือของตัวเอง',
+    note: 'นักเรียนเดียว — ครู: getStudent(id, ownerId) กรองให้เหลือของตัวเอง; นักเรียน: currentPlayer().studentId ต้องตรงกับ id (ดูได้แค่ตัวเอง) แล้วหาเจ้าของจากเกมที่ตัวเองเล่น',
     methods: {
-      GET: { guards: ['requireAccount'] },
+      GET: { guards: ['requireAccount', 'currentPlayer', 'getGame'] },
       PATCH: { guards: ['requireAccount'] },
       DELETE: { guards: ['requireAccount'] },
     },
@@ -129,9 +129,13 @@ const DECLARED = {
     },
   },
   'players/route.ts': {
+    // ⚠️ เคยใช้ requireOwnedGame แล้วพังตอนครูสลับมาเป็นนักเรียน
+    //    เพราะมัน return ทันทีเมื่อไม่ใช่เจ้าของ → ครูคนอื่นที่คุกกี้ค้างอยู่
+    //    โดน 404 ตั้งแต่แรก แล้วไม่ได้ไปทางนักเรียนเลย
+    //    แก้เป็น getOwnedGame (เช็คว่าเป็นเจ้าของจริงไหม แล้วปล่อยตก) + requirePlayerInGame
     note: 'รายชื่อคนในห้อง — ครูดูได้เฉพาะเกมตัวเอง, นักเรียนดูได้แค่ห้องที่ตัวอยู่',
     methods: {
-      GET: { guards: ['requireOwnedGame', 'requirePlayerInGame'] },
+      GET: { guards: ['getOwnedGame', 'requirePlayerInGame', 'currentPlayer'] },
       // POST = เข้าห้อง เปิดได้ แต่ต้องผูกกับเจ้าของเกม (ดู getStudent(studentId, game.ownerId))
       POST: { alsoCalls: ['getStudent', 'attachStudentCookie'] },
     },
@@ -217,6 +221,41 @@ function matchBrace(src, open) {
  *    แต่ก็ใช่วยทั้งไฟล์พร้อมกันไม่ได้ เพราะแล้วด่านใน method หนึ่งจะไปผ่านทุก method
  *    จึงรวมเฉพาะ "ช่วงของตัว helper" เท่านั้น ไม่ใช่ทั้งไฟล์
  */
+/**
+ * หาตำแหน่ง { ที่เปิด body ของฟังก์ชัน
+ *
+ * ⚠️ ห้ามแค่เอา indexOf('{') หลังชื่อฟังก์ชัน เพราะ return type ที่มี object
+ *    (เช่น Promise<{ ownerId: string }>) มี { มาก่อน body ตัวจริง
+ *    → เด็ดขาด helper ทิ้ง แล้วรายงานว่า "ไม่มีด่านตรวจ" ทั้งที่มี
+ *    (คือเทสต์นี้หลอกคนแก้โค้ดจริงได้ — เจอแล้วต้องแก้ ไม่ใช่เพิ่มด่านซ้ำ)
+ *
+ * วิธี: มองหา { ที่อยู่นอก <...> และนอก (...) เท่านั้น
+ *   - Promise<{ a: 1 }>  → { อยู่ใน <> → ข้ามไป
+ *   - ): { a: 1 } => {    → { นอก <> → อันนี้คือ body
+ */
+function bodyBraceAt(src, from) {
+  let angle = 0;
+  let paren = 0;
+  for (let i = from; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const quote = ch;
+      i++;
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === '\\') i++;
+        i++;
+      }
+      continue;
+    }
+    if (ch === '(') paren++;
+    else if (ch === ')') paren--;
+    else if (ch === '<') angle++;
+    else if (ch === '>') angle--;
+    else if (ch === '{' && angle <= 0 && paren <= 0) return i;
+  }
+  return -1;
+}
+
 function methodBodies(src) {
   const decl = new RegExp(`export\\s+(?:async\\s+function\\s+|const\\s+)${METHOD}\\b`, 'g');
   const marks = [];
@@ -236,7 +275,7 @@ function methodBodies(src) {
     if ((m.index > 0 && src[m.index - 1] === 't') || /^export/.test(src.slice(Math.max(0, m.index - 6), m.index + 1))) {
       continue; // เป็น export function
     }
-    const braceAt = src.indexOf('{', m.index);
+    const braceAt = bodyBraceAt(src, m.index);
     if (braceAt < 0) continue;
     const closeAt = matchBrace(src, braceAt);
     helpers.push(src.slice(m.index, closeAt + 1));

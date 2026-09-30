@@ -14,7 +14,14 @@
 
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { getAccountByToken, getOwnedGame, getPlayer, type TeacherAccount } from './db';
+import {
+  getAccountByToken,
+  getOwnedGame,
+  getGame,
+  getGameByRoomCode,
+  getPlayer,
+  type TeacherAccount,
+} from './db';
 
 export const SESSION_COOKIE = 'cq_session';
 
@@ -173,4 +180,87 @@ export function publicGame(game: any) {
   if (!game) return game;
   const { ownerId, ...rest } = game;
   return rest;
+}
+
+/**
+ * ตัดเฉลยออกจากภารกิจก่อนส่งให้นักเรียน
+ *
+ * ⚠️ จุดที่เคยรั่ว: /api/missions เปิดสาธารณะมานาน ทำให้นักเรียนอ่าน correctAnswer
+ *    ของทุกข้อได้ตั้งแต่ก่อนเริ่มเล่น (เปิด DevTools → ดูเฉลยทันหมด)
+ *    ตอนนี้ปิดเฉลยไว้ แล้วให้เซิร์ฟเวอร์เฉลยทีละข้อหลังตอบเสร็จแทน
+ *      → ดูคำตอบถูกหลังตอบ: ใช้ correctAnswer ที่ /api/answers ตอบกลับมา
+ *
+ * เก็บไว้: prompt/options/pairs/unit/explanation เพราะหน้าเล่นต้องใช้วาดหน้าจอ
+ * (สำหรับชนิด 'match' เฉลยคือลำดับ 0..n-1 ซึ่งผู้เล่นเห็นจากหน้าจออยู่แล้ว)
+ */
+export function publicMissions(missions: any[]) {
+  if (!Array.isArray(missions)) return [];
+  return missions.map((m: any) => ({
+    ...m,
+    questions: Array.isArray(m?.questions)
+      ? m.questions.map((q: any) => {
+          const { correctAnswer: _answer, ...rest } = q || {};
+          return rest;
+        })
+      : [],
+  }));
+}
+
+/**
+ * ขอดูข้อมูลเกม — ผ่านได้ทั้งเจ้าของ (เห็นข้อมูลเต็ม) และนักเรียนที่อยู่ในห้องนั้น (เห็นเฉพาะที่จำเป็น)
+ *
+ * ใช้กับ route ที่ "ฝั่งนักเรียนต้องอ่านได้" เช่น GET /api/games/:id, GET /api/missions
+ * requireOwnedGame ใช้ไม่ได้ เพราะนักเรียนไม่มีบัญชีครู
+ *
+ * isOwner บอก route ว่าจะส่งข้อมูลแบบไหน: เจ้าของได้เต็ม / นักเรียนได้ publicGame + publicMissions
+ */
+export type GameViewer = { ownerId: string; isOwner: boolean; game: any };
+
+export async function requireGameViewer(
+  gameId: string | undefined
+): Promise<GameViewer | NextResponse> {
+  if (!gameId) {
+    return NextResponse.json({ success: false, error: 'ไม่พบ id ของเกม' }, { status: 400 });
+  }
+
+  const account = await getCurrentAccount();
+  if (account) {
+    const owned = await getOwnedGame(gameId, account.id);
+    if (owned) return { ownerId: account.id, isOwner: true, game: owned };
+  }
+
+  // นักเรียน: ต้องเป็นผู้เล่นที่กำลังอยู่ในเกมนี้จริง (คุกกี้ cq_student ตั้งตอนเข้าห้อง)
+  const player = await currentPlayer();
+  if (player && player.gameId === gameId) {
+    const game = await getGame(gameId);
+    if (game) return { ownerId: game.ownerId || '', isOwner: false, game };
+  }
+
+  return notFound();
+}
+
+/**
+ * ยืนยันด้วยรหัสห้อง — ทางออกเดียวของนักเรียนที่ยังไม่ได้เข้าห้อง
+ *
+ * ตอนก่อนเข้าห้อง นักเรียนยังไม่มีทั้งบัญชีครูและไม่มีคุกกี้ผู้เล่น
+ * สิ่งเดียวที่เขามีคือรหัสห้อง 6 หลักที่ครูบอกมา → ใช้ตัวนี้เป็นหลักฐานแทน
+ *
+ * ⚠️ การเพิ่มชื่อเข้ารายชื่อได้ด้วยรหัสห้อง = ใครมีรหัสห้องก็เพิ่มชื่อได้
+ *    เดิมแย่กว่านี้มาก (เพิ่มชื่อลงรายชื่อรวมของทุกคนได้โดยไม่ต้องมีอะไรเลย)
+ *    ถ้าภายหลังอยากปิด: ต้องเพิ่มสวิตช์ "เปิดให้เพิ่มชื่อเอง" ต่อเกม
+ */
+export async function requireRoomCode(
+  gameId: string | undefined,
+  code: string | null | undefined
+): Promise<{ game: any } | NextResponse> {
+  if (!gameId || !code) {
+    return NextResponse.json(
+      { success: false, error: 'ไม่พบรหัสห้อง — กรุณากรอก Room Code อีกครั้ง' },
+      { status: 400 }
+    );
+  }
+  const game = await getGameByRoomCode(String(code).toUpperCase().trim());
+  // เทียบทั้ง id และรหัสห้อง: ผิวันถ้าส่งมาแค่รหัสห้องของห้องอื่น
+  if (!game || game.id !== gameId) return notFound();
+  return { game };
 }

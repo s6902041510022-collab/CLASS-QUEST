@@ -28,6 +28,8 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState<{ id: number; text: string } | null>(null);
+  // คะแนนสะสมของตัวเอง — ต้องมีที่เห็นตลอด ไม่ใช่ขึ้นมาแล้วหายไปใน toast
+  const [totalXp, setTotalXp] = useState(0);
 
   useEffect(() => {
     setPlayerId(new URLSearchParams(window.location.search).get('playerId') || '');
@@ -51,7 +53,11 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
     fetch(`/api/players?id=${playerId}`)
       .then((r) => r.json())
       .then((j) => {
-        if (j.success) setPlayer(j.data);
+        if (j.success) {
+          setPlayer(j.data);
+          // คะแนนตั้งต้นก่อนตอบข้อแรก (เข้าครั้งแรกมักเป็น 0)
+          if (j.data?.xp != null) setTotalXp(Number(j.data.xp) || 0);
+        }
       })
       .catch(() => {});
   }, [playerId]);
@@ -394,6 +400,9 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
         return;
       }
       const d = r.data;
+      // เซิร์ฟเวอร์ส่งคะแนนสะสมกลับมาทุกครั้งที่ตอบ → ใช้ค่านี้เป็นตัวเลขบนจอ
+      // (ไม่งั้นนักเรียนตอบถูกแล้วไม่เห็นคะแนนขยับเลย เห็นแต่ข้อความหายไป)
+      if (d?.totalXp != null) setTotalXp(Number(d.totalXp) || 0);
       if (d.correct) {
         // ✅ ตอบถูก → ขยับข้อถัดไปทันที (ไม่ต้องรอครู!)
         applyPos(d);
@@ -584,6 +593,18 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
         </Link>
       </div>
       <div className="card w-full max-w-md p-6">
+        {/* คะแนนสะสม — ต้องอยู่ตลอดการเล่น ไม่ใช่โผล่เป็นข้อความชั่วครู่
+            (เดิมมีแต่ toast 1.8 วินาที → นักเรียนตอบถูกแล้วไม่เห็นคะแนนขึ้น) */}
+        <div className="flex items-center justify-between mb-4 px-1">
+          <span className="text-xs font-medium text-quest-text/60">⭐ คะแนนของฉัน</span>
+          <span
+            key={totalXp}
+            className="text-sm font-bold tabular-nums text-quest-sky animate-xp-bump"
+          >
+            {totalXp.toLocaleString('th-TH')} XP
+          </span>
+        </div>
+
         {toast && (
           <div
             key={toast.id}
@@ -815,7 +836,11 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
 
             <div className="p-4 bg-green-50 rounded-2xl text-left">
               <p className="text-xs font-medium text-green-700 mb-1">✅ คำตอบที่ถูกคือ</p>
-              <p className="text-sm text-green-800 font-medium">{correctLabel(task)}</p>
+              <p className="text-sm text-green-800 font-medium">
+                {/* เฉลยมาจากคำตอบของ /api/answers ไม่ใช่จากภารกิจ
+                    เพราะ /api/missions ตัด correctAnswer ทิ้งให้นักเรียน (กันอ่านเฉลยล่วงหน้า) */}
+                {correctLabel({ ...task, correctAnswer: answer.correctAnswer })}
+              </p>
             </div>
 
             {task.kind !== 'match' && (

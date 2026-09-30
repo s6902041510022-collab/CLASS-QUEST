@@ -41,6 +41,7 @@ function Lobby() {
   useEffect(() => {
     if (!gameId) return;
     let cancelled = false;
+    const myPlayerId = sp.get('playerId') || '';
     const poll = async () => {
       try {
         const [s, p] = await Promise.all([
@@ -51,10 +52,18 @@ function Lobby() {
         if (p.success) setPlayers(p.data || []);
         const status = s.success && s.data ? s.data.status : 'lobby';
         if (status === 'question' || status === 'paused' || status === 'boss') {
-          router.replace(`/student/game/${gameId}?playerId=${sp.get('playerId')}&studentId=${studentId}`);
+          router.replace(`/student/game/${gameId}?playerId=${myPlayerId}&studentId=${studentId}`);
+          return;
         }
         if (status === 'completed') {
-          router.replace(`/student/me?studentId=${studentId}&gameId=${gameId}`);
+          // ⚠️ รอบที่ปิดแล้ว ≠ รอบของฉันจบ
+          //    ถ้าพาไปหน้าผลวิเคราะห์ทุกครั้งที่เห็น completed นักเรียนที่เพิ่งเข้ามา
+          //    (หรือกลับมาเปลี่ยนชื่อ) จะโดนดันออกจากห้องรอทันทีทั้งที่ยังไม่ได้เล่น
+          //    → ต้องเช็คก่อนว่าตัวเองอยู่ในรายชื่อของรอบนั้นจริงไหม
+          const iPlayed = p.success && (p.data || []).some((x: any) => x.id === myPlayerId);
+          if (iPlayed) {
+            router.replace(`/student/me?studentId=${studentId}&gameId=${gameId}`);
+          }
         }
       } catch {
         /* ไม่ critical */

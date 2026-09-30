@@ -30,14 +30,18 @@ export default function StudentJoinPage() {
     if (!game) return;
     (async () => {
       try {
-        const r = await fetch('/api/students');
+        // ต้องส่ง gameId + roomCode ไปด้วย เพราะนักเรียนยังไม่มีบัญชี
+        // (รหัสห้องคือหลักฐานว่ารู้จักห้องนี้ — ดู POST ด้านล่าง)
+        const r = await fetch(
+          `/api/students?gameId=${game.id}&roomCode=${encodeURIComponent(game.roomCode || roomCode)}`
+        );
         const j = await r.json();
         if (j.success) setRoster(j.data || []);
       } catch {
         /* ไม่ critical */
       }
     })();
-  }, [game]);
+  }, [game, roomCode]);
 
   const checkRoom = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,7 +102,13 @@ export default function StudentJoinPage() {
       const r = await fetch('/api/students', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim(), avatar: newAvatar }),
+        body: JSON.stringify({
+          name: newName.trim(),
+          avatar: newAvatar,
+          // นักเรียนไม่มีบัญชี → ต้องยืนยันด้วยรหัสห้องที่พิสูจน์ไว้แล้วตอนกรอก
+          gameId: game.id,
+          roomCode: game.roomCode || roomCode,
+        }),
       });
       const j = await r.json();
       if (!j.success) {
