@@ -192,6 +192,15 @@ export default function TeacherLoginPage() {
           </div>
         )}
 
+        {/* ล็อกอินไม่ได้บ่อยครั้งเพราะระบบเขียนฐานข้อมูลไม่ได้
+            (เช่น deploy บน Vercel ที่ filesystem เป็น read-only)
+            ให้ทางไปหน้าที่บอกสาเหตุ + วิธีแก้ ไม่ใช่ให้ครูเดาทีละอย่าง */}
+        <div className="mt-4 text-center">
+          <Link href="/setup" className="text-sm text-quest-text/50 underline hover:text-quest-sky">
+            ล็อกอินไม่ได้? ดูสถานะระบบและวิธีแก้
+          </Link>
+        </div>
+
         <div className="mt-6 text-center">
           <Link href="/" className="text-quest-text/60 hover:text-quest-sky">
             ← กลับหน้าแรก

@@ -12,10 +12,14 @@
     "lint": "next lint",
     "check": "node scripts/check.mjs",
     "test": "node --import ./scripts/register-ts.mjs --test",
-    "seed": "node data/seed-all.mjs"
+    "seed": "node data/seed-all.mjs",
+    "seed:kv": "node data/seed-kv.mjs",
+    "seed:firestore": "node data/seed-firestore.mjs",
+    "db:upload:firestore": "node data/seed-firestore.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.0",
+    "firebase-admin": "^14.5.0",
     "next": "14.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

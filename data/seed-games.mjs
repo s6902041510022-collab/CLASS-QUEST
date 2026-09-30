@@ -1,10 +1,19 @@
 // เพิ่มเกมตัวอย่าง 2 เกม (เกมคำถามหลากหลายรูปแบบ + เกมทีม)
-// ใช้: node data/seed-games.mjs   (ทำงานซ้ำได้ ไม่สร้างซ้ำถ้ามี id เดิมแล้ว)
+//
+// ใช้ได้ 2 แบบ ทั้งสองทำงานซ้ำได้ (ไม่สร้างซ้ำถ้ามี id เดิมแล้ว)
+//   1) รันตรง ๆ : node data/seed-games.mjs   -> เขียนลง data/db.json
+//   2) นำเข้า   : applySeedGames(db)         -> ใช้กับ Redis ผ่าน data/seed-kv.mjs
+//
+// ทำไมต้องแยก: ตอน deploy บน Vercel ต้องใช้ Redis แต่สคริปต์เดิมเขียนลงไฟล์
+// ซึ่ง /var/task เป็น read-only เขียนไม่ได้ เกมตัวอย่างจึงไปไม่ถึงเซิร์ฟเวอร์
 import { readFileSync, writeFileSync } from 'fs';
+import { pathToFileURL } from 'url';
 import path from 'path';
 
 const DB = path.join(process.cwd(), 'data', 'db.json');
-const db = JSON.parse(readFileSync(DB, 'utf8'));
+
+/** รันตรง ๆ ไหม — ถ้า import เข้ามาไม่ต้องเขียนไฟล์ (ใช้แค่ export) */
+const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 const T = '2026-09-29T00:00:00.000Z';
 const q = (id, text, options, correctAnswer, explanation) => ({
@@ -234,21 +243,36 @@ const games = [
   },
 ];
 
-// เพิ่มแบบไม่ซ้ำ (เช็ค id)
-const haveGame = new Set(db.games.map((g) => g.id));
-const haveMission = new Set(db.missions.map((m) => m.id));
+/**
+ * เติมเกมตัวอย่างชุดนี้ลงในออบเจกต์ฐานข้อมูล (แก้ของเดิม คืนจำนวนที่เพิ่มใหม่)
+ * ใช้ร่วมกันได้ทั้งฐานข้อมูลแบบไฟล์และ Redis
+ */
+export function applySeedGames(db) {
+  const haveGame = new Set(db.games.map((g) => g.id));
+  const haveMission = new Set(db.missions.map((m) => m.id));
 
-for (const g of games) if (!haveGame.has(g.id)) db.games.push(g);
-for (const m of [...game1Missions, ...game2Missions])
-  if (!haveMission.has(m.id)) db.missions.push(m);
+  const addedGames = games.filter((g) => !haveGame.has(g.id));
+  const addedMissions = [...game1Missions, ...game2Missions].filter((m) => !haveMission.has(m.id));
 
-db.games.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-db.missions.sort(
-  (a, b) =>
-    (a.gameId === b.gameId ? (a.order || 0) - (b.order || 0) : String(a.gameId).localeCompare(String(b.gameId)))
-);
+  db.games.push(...addedGames);
+  db.missions.push(...addedMissions);
 
-writeFileSync(DB, JSON.stringify(db, null, 2), 'utf8');
+  db.games.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  db.missions.sort(
+    (a, b) =>
+      (a.gameId === b.gameId ? (a.order || 0) - (b.order || 0) : String(a.gameId).localeCompare(String(b.gameId)))
+  );
 
-console.log('games:', db.games.map((g) => `${g.id}=${g.name} [${g.mode}]`).join('\n       '));
-console.log('missions:', db.missions.length);
+  return { addedGames: addedGames.length, addedMissions: addedMissions.length };
+}
+
+// รันตรง ๆ = เขียนลงไฟล์
+if (isMain) {
+  const db = JSON.parse(readFileSync(DB, 'utf8'));
+  const added = applySeedGames(db);
+  writeFileSync(DB, JSON.stringify(db, null, 2), 'utf8');
+
+  console.log('games:', db.games.map((g) => `${g.id}=${g.name} [${g.mode}]`).join('\n       '));
+  console.log('missions:', db.missions.length);
+  console.log(`เพิ่มใหม่ ${added.addedGames} เกม / ${added.addedMissions} ด่าน`);
+}

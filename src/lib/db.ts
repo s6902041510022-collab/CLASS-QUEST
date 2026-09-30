@@ -5,6 +5,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { BOSS_DAMAGE_PER_CORRECT } from './utils';
 import { missionToTasks } from './mission-tasks';
+import { isFirebaseConfigured, getFirestoreDb } from './firebase';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'db.json');
 const DB_SEED_PATH = path.join(process.cwd(), 'data', 'db.default.json');
@@ -46,6 +47,7 @@ const KV_KEY = process.env.KV_DB_KEY || 'classquest:db';
 const CACHE_MS = 2000;
 
 export const usingKv = Boolean(KV_URL && KV_TOKEN);
+export const usingFirestore = isFirebaseConfigured();
 
 export type Store = {
   data: DBData;
@@ -211,7 +213,77 @@ const kvBackend: Backend = {
   locked: withLock,
 };
 
-const backend: Backend = usingKv ? kvBackend : fileBackend;
+const FIRESTORE_COLLECTION = process.env.FIREBASE_FIRESTORE_COLLECTION || 'classquest';
+const FIRESTORE_DOC = process.env.FIREBASE_FIRESTORE_DOC || 'db';
+const firestorePath = `${FIRESTORE_COLLECTION}/${FIRESTORE_DOC}`;
+
+/**
+ * แปลงข้อผิดพลาดจาก Firestore ให้บอกได้ว่าต้องทำอะไรต่อ
+ *
+ * ⚠️ จุดที่เคยพลาด: load() เดิมกลืน error แล้วคืน seedData() (ฐานข้อมูลว่าง)
+ * ซึ่งแย่งกับเงียบ ๆ แต่พอการเขียนครั้งถัดไป docRef.set() จะเขียนทับข้อมูลจริงทิ้ง
+ * = ข้อมูลหายจริงโดยที่ไม่มีอะไรฟ้อง
+ * ตอนนี้โยน error พร้อมบอกชื่อ env ออกไปแทน ให้เห็นตอนที่ยังไม่มีข้อมูลเสียหาย
+ */
+function explainFirestoreFail(err: any): Error {
+  const detail = err instanceof Error ? err.message : String(err);
+  return new Error(
+    `ต่อ Firestore (${firestorePath}) ไม่สำเร็จ: ${detail} — ` +
+      `ระบบเลือกใช้ Firestore เพราะเจอ credential อยู่ ตรวจว่า FIREBASE_PROJECT_ID, ` +
+      `FIREBASE_CLIENT_EMAIL และ FIREBASE_PRIVATE_KEY ถูกต้องและยังไม่หมดอายุ ` +
+      `(รวมถึงกฎ Firestore Rules ว่าอนุญาตให้อ่าน/เขียนได้) ` +
+      `ถ้าตั้งแต่เครื่องนี้ไม่ได้ ให้ถอด credential ออกเพื่อกลับไปใช้ Redis หรือไฟล์ตามเดิม`
+  );
+}
+
+const firestoreBackend: Backend = {
+  label: `Firebase Firestore (${firestorePath})`,
+  async load() {
+    const firestore = getFirestoreDb();
+    if (!firestore) throw explainFirestoreFail(new Error('ยังไม่ได้เชื่อมต่อ (credential ใช้ไม่ได้)'));
+    const docRef = firestore.collection(FIRESTORE_COLLECTION).doc(FIRESTORE_DOC);
+    try {
+      const snapshot = await docRef.get();
+      if (!snapshot.exists) {
+        // ยังไม่เคยมีข้อมูลใน Firestore = ครั้งแรก เริ่มจากค่าเริ่มต้น (อ่านจาก data/db.default.json)
+        const initial = seedData();
+        await docRef.set(initial);
+        return initial;
+      }
+      return normalize(snapshot.data()).data;
+    } catch (err) {
+      throw explainFirestoreFail(err);
+    }
+  },
+  async save(data) {
+    const firestore = getFirestoreDb();
+    if (!firestore) throw explainFirestoreFail(new Error('ยังไม่ได้เชื่อมต่อ (credential ใช้ไม่ได้)'));
+    const docRef = firestore.collection(FIRESTORE_COLLECTION).doc(FIRESTORE_DOC);
+    try {
+      await docRef.set(data);
+    } catch (err) {
+      throw explainFirestoreFail(err);
+    }
+  },
+  // Firestore ไม่มีล็อกแบบ Redis แต่ getDb().write() อ่านของล่าสุดมา merge ก่อนบันทึก
+  // จึงยังไม่ทับงานของคนอื่นแบบตรง ๆ (ต่างจากเขียนทับทั้งก้อน)
+  locked: async (fn) => fn(),
+};
+
+/**
+ * เลือกที่เก็บข้อมูล — ลำดับสำคัญ: Redis > Firestore > ไฟล์
+ *
+ * ทำไม Redis ขึ้นก่อน
+ * - ครูเลือก Redis (Vercel KV / Upstash) ไว้แล้ว เพราะ deploy บน Vercel ได้
+ * - ถ้า Firestore ชนะก่อน พอตั้ง env ของทั้งสองชุด Firestore จะเงียบ ๆ แย่งไปใช้
+ *   แล้วข้อมูลที่อยู่ใน Redis จะหายไปจากหน้าจอโดยไม่มีใครสังเกต
+ * - อยากใช้ Firestore แทน? แค่ถอด KV_REST_API_URL / KV_REST_API_TOKEN ออก
+ *   ไม่ต้องแก้โค้ดที่นี่
+ *
+ * ⚠️ ทั้งสองชุดคำนวณค่านี้ตอน import (โมดูลโหลดครั้งเดียว)
+ *    แก้ env แล้วต้อง restart เซิร์ฟเวอร์ใหม่ถึงจะมีผล
+ */
+const backend: Backend = usingKv ? kvBackend : usingFirestore ? firestoreBackend : fileBackend;
 export const storeLabel = backend.label;
 
 /**
@@ -222,8 +294,29 @@ export const storeLabel = backend.label;
  * เพราะหน้าเว็บไม่ได้แตะฐานข้อมูลจนกว่าจะกดล็อกอิน — ถ้ามีค่านี้บอกได้ทันที
  * ว่าเขียนไม่ได้ แทนที่จะต้องไปเดาทีละอย่าง
  */
+/** ลองต่อที่เก็บข้อมูลจริง แล้วบอกว่าใช้ได้ไหม (ไม่ใช่แค่เดาจาก env) */
+async function probeRemote(probe: () => Promise<unknown>, name: string) {
+  try {
+    await probe();
+    return { writable: true };
+  } catch (err: any) {
+    return { writable: false, reason: `${name}: ${err?.message || String(err)}` };
+  }
+}
+
+/** อ่าน Firestore จริงหนึ่งครั้ง (ไม่เขียนอะไร — ต่างจาก firestoreBackend.load() ที่จะสร้าง doc ครั้งแรก) */
+async function probeFirestore(): Promise<unknown> {
+  const firestore = getFirestoreDb();
+  if (!firestore) throw new Error('ยังไม่ได้เชื่อมต่อ (credential ใช้ไม่ได้)');
+  return firestore.collection(FIRESTORE_COLLECTION).doc(FIRESTORE_DOC).get();
+}
+
 export async function storeWritable(): Promise<{ writable: boolean; reason?: string }> {
-  if (usingKv) return { writable: true }; // Redis ไม่ต้องใช้ดิสก์
+  // ⚠️ อย่าเพิ่งตอบว่า writable เฉย ๆ เพราะ "มี env" ไม่ได้แปลว่าใช้ได้
+  // เคยเจอการณีนี้: ตั้ง env ครบแต่ credential ผิด/หมดอายุ หน้าเว็บยังเปิดได้
+  // ทุกอย่างฟ้องว่าปกติ แต่พอกดแล้ว 500 — ต้องยิงจริงเพื่อให้รู้ตั้งแต่ยังไม่เสียข้อมูล
+  if (usingKv) return probeRemote(() => kvCommand(['PING']), 'Redis');
+  if (usingFirestore) return probeRemote(probeFirestore, 'Firestore');
   try {
     await access(dirname(DB_PATH), constants.W_OK);
     return { writable: true };

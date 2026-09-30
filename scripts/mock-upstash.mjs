@@ -33,6 +33,10 @@ export async function startMockUpstash(options = {}) {
     if (!Array.isArray(cmd)) throw new Error('คำสั่งต้องเป็น array');
     const [op, key, value, ...rest] = cmd;
 
+    // ใช้ตรวจว่ายังต่อ Redis ได้อยู่จริง (storeWritable() ยิงคำสั่งนี้)
+    // ต้องมีใน mock ไม่งั้นเทสต์จะคิดว่า Redis ใช้ไม่ได้ ทั้งที่ mock ปกติดี
+    if (op === 'PING') return 'PONG';
+
     if (op === 'GET') {
       if (expired(key)) return null;
       return store.get(key).value;
@@ -92,6 +96,8 @@ export async function startMockUpstash(options = {}) {
     /** ดูค่าที่เก็บไว้ โดยไม่ต้องผ่าน protocol (ใช้ตรวจว่าเขียนลง Redis จริง) */
     peek: (key) => store.get(key)?.value ?? null,
     has: (key) => store.has(key),
+    /** เขียนค่าตรง ๆ โดยไม่ผ่าน protocol — ใช้จำลองสถานะที่มีอยู่ก่อนหน้านี้ */
+    forceSet: (key, value) => store.set(key, { value: String(value), expiresAt: null }),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }

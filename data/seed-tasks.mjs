@@ -1,15 +1,21 @@
 // เพิ่มเกมตัวอย่างที่รวมคำถามทั้ง 3 ชนิด (ตัวเลือก / กรอกตัวเลข / จับคู่) ไว้ให้ลองเล่น
-// ใช้: node data/seed-tasks.mjs   (ทำงานซ้ำได้ ไม่สร้างซ้ำถ้ามี id เดิมแล้ว)
+//
+// ใช้ได้ 2 แบบ ทั้งสองทำงานซ้ำได้ (ไม่สร้างซ้ำถ้ามี id เดิมแล้ว)
+//   1) รันตรง ๆ : node data/seed-tasks.mjs   -> เขียนลง data/db.json
+//   2) นำเข้า   : applySeedTasks(db)         -> ใช้กับ Redis ผ่าน data/seed-kv.mjs
 //
 // หมายเหตุ: คำถามแต่ละช่องมี field `kind` บอกชนิด
 //   - ไม่มี kind (หรือ 'quiz') = ตัวเลือกแบบเดิม
 //   - 'numeric' = กรอกตัวเลข (มี unit ได้)
 //   - 'match'   = จับคู่ (มี pairs)
 import { readFileSync, writeFileSync } from 'fs';
+import { pathToFileURL } from 'url';
 import path from 'path';
 
 const DB = path.join(process.cwd(), 'data', 'db.json');
-const db = JSON.parse(readFileSync(DB, 'utf8'));
+
+/** รันตรง ๆ ไหม — ถ้า import เข้ามาไม่ต้องเขียนไฟล์ (ใช้แค่ export) */
+const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 const T = '2026-09-30T00:00:00.000Z';
 
@@ -148,24 +154,42 @@ const missions = [
   },
 ];
 
-// เพิ่มแบบไม่ซ้ำ (เช็ค id)
-const haveGame = new Set(db.games.map((g) => g.id));
-const haveMission = new Set(db.missions.map((m) => m.id));
+/**
+ * เติมเกมตัวอย่างชุดนี้ลงในออบเจกต์ฐานข้อมูล (แก้ของเดิม คืนจำนวนที่เพิ่มใหม่)
+ * ใช้ร่วมกันได้ทั้งฐานข้อมูลแบบไฟล์และ Redis
+ */
+export function applySeedTasks(db) {
+  const haveGame = new Set(db.games.map((g) => g.id));
+  const haveMission = new Set(db.missions.map((m) => m.id));
 
-if (!haveGame.has(game.id)) db.games.push(game);
-for (const m of missions) if (!haveMission.has(m.id)) db.missions.push(m);
+  const addedGame = !haveGame.has(game.id);
+  const addedMissions = missions.filter((m) => !haveMission.has(m.id));
 
-db.games.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-db.missions.sort(
-  (a, b) =>
-    a.gameId === b.gameId
-      ? (a.order || 0) - (b.order || 0)
-      : String(a.gameId).localeCompare(String(b.gameId))
-);
+  if (addedGame) db.games.push(game);
+  db.missions.push(...addedMissions);
 
-writeFileSync(DB, JSON.stringify(db, null, 2), 'utf8');
+  db.games.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  db.missions.sort(
+    (a, b) =>
+      a.gameId === b.gameId
+        ? (a.order || 0) - (b.order || 0)
+        : String(a.gameId).localeCompare(String(b.gameId))
+  );
 
-const added = missions.filter((m) => !haveMission.has(m.id)).length;
-console.log(`เกม ${game.id} = ${game.name}`);
-console.log(`เพิ่มด่านใหม่ ${added} ด่าน (ทั้งหมด ${missions.length} ด่านของเกมนี้)`);
-console.log('missions ทั้งหมดในระบบ:', db.missions.length);
+  return {
+    addedGame: addedGame ? 1 : 0,
+    addedMissions: addedMissions.length,
+    missionsTotal: missions.length,
+  };
+}
+
+// รันตรง ๆ = เขียนลงไฟล์
+if (isMain) {
+  const db = JSON.parse(readFileSync(DB, 'utf8'));
+  const added = applySeedTasks(db);
+  writeFileSync(DB, JSON.stringify(db, null, 2), 'utf8');
+
+  console.log(`เกม ${game.id} = ${game.name}`);
+  console.log(`เพิ่มด่านใหม่ ${added.addedMissions} ด่าน (ทั้งหมด ${added.missionsTotal} ด่านของเกมนี้)`);
+  console.log('missions ทั้งหมดในระบบ:', db.missions.length);
+}
