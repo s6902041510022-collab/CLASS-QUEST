@@ -1,5 +1,9 @@
 // เทสต์ชั้นแกนของ Mission Tasks — รัน: node --test scripts/mission-tasks.test.mjs
 // เน้น 2 ข้อ: (1) ด่านเดิมต้องได้จำนวนงานเท่าเดิมทุกประการ (2) การตรวจ choice ต้องตรงของเดิมเป๊ะ
+//
+// ⚠️ ไฟล์นี้ import '../src/lib/mission-tasks.ts' ตรง ๆ ต้องใช้ Node ที่ strip
+//    TypeScript ได้เอง (Node 24) ถ้าใช้ Node 20 จะได้ ERR_UNKNOWN_FILE_EXTENSION
+//    เวลา import ไฟล์ .ts — ไม่ใช่ตัวเทสต์พัง ดู engines ใน package.json
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {

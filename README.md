@@ -22,6 +22,9 @@
 
 ## 📋 การติดตั้ง
 
+> **ต้องใช้ Node.js 24 ขึ้นไป** — เทสต์ชุดหนึ่ง import ไฟล์ `.ts` ตรง ๆ ซึ่งต้องใช้
+> ความสามารถ strip types ของ Node (ถ้าใช้ Node 20 จะได้ `ERR_UNKNOWN_FILE_EXTENSION`)
+
 ```bash
 # Clone repository
 git clone https://github.com/s6902041510022-collab/CLASS-QUEST.git
@@ -59,6 +62,9 @@ npm run dev
 npm test        # unit + e2e (ต้องเปิด dev server ที่พอร์ต 3000 สำหรับส่วน e2e)
 npm run check   # tsc --noEmit + production build
 ```
+
+ทุก push และ PR ขึ้น `main` จะรันอัตโนมัติที่ Actions (`tsc + build` และ `npm test`)
+ดูสถานะได้ที่ https://github.com/s6902041510022-collab/CLASS-QUEST/actions
 
 ## 🔧 การตั้งค่า
 

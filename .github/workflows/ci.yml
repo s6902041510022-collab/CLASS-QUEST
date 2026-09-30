@@ -20,9 +20,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 24 จำเป็น: scripts/mission-tasks.test.mjs import ไฟล์ .ts ตรง ๆ
+      # ซึ่งต้องใช้ Node ที่ strip types ได้เอง (Node 20 จะพังด้วย
+      # ERR_UNKNOWN_FILE_EXTENSION) — ดูรายละเอียดที่ comment ในไฟล์เทสต์
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: ติดตั้ง dependencies
@@ -42,7 +45,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: ติดตั้ง dependencies
