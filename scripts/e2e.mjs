@@ -28,6 +28,7 @@ const FILES = [
   'scripts/e2e-choice.test.mjs',
   'scripts/e2e-tasks.test.mjs',
   'scripts/api-isolation.test.mjs',
+  'scripts/api-student-flow.test.mjs',
 ];
 
 const hasBackup = existsSync(BACKUP);

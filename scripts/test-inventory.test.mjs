@@ -50,7 +50,12 @@ const unitListed = scriptsIn(pkg.scripts['test:unit'] || '');
 const e2eListedFiles = e2eListed();
 
 /** ไฟล์เทสต์ที่ต้องมี dev server จึงจะรันได้ — แยกออกจากชุด unit */
-const NEEDS_SERVER = new Set(['api-isolation', 'e2e-choice', 'e2e-tasks']);
+const NEEDS_SERVER = new Set([
+  'api-isolation',
+  'api-student-flow', // นักเรียนไม่มีบัญชี → ต้องยิงเซิร์ฟเวอร์จริงที่ไม่มีคุกกี้ครูติดไปด้วย
+  'e2e-choice',
+  'e2e-tasks',
+]);
 
 /** ตัวช่วยที่อยู่ใน scripts/ แต่ไม่ใช่เทสต์ — ห้ามถูกสั่งรันเป็นเทสต์ */
 const NOT_TESTS = new Set([
