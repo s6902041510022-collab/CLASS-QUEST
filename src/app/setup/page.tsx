@@ -19,6 +19,7 @@ type Health = {
   usingKv?: boolean;
   usingFirestore?: boolean;
   wrongRedisIntegration?: boolean;
+  readOnlyTokenOnly?: boolean;
   firebaseSource?: string | null;
   writable?: boolean;
   hint?: string;
@@ -99,6 +100,20 @@ export default function SetupPage() {
               <br />
               ต้องถอด integration ที่ติดตั้งไปออก แล้วติดตั้งใหม่ชื่อ <strong>Upstash</strong> แทน
               (ชื่อ &quot;Redis&quot; ใช้ไม่ได้)
+            </p>
+          </div>
+        )}
+
+        {/* ใส่โทเคนผิดใบ — อ่านได้แต่เขียนไม่ได้ ดูเหมือนฐานข้อมูลเสีย */}
+        {data?.readOnlyTokenOnly && (
+          <div className="rounded-xl border border-red-300 bg-red-50 p-5">
+            <p className="font-semibold text-red-800">ใส่โทเคนผิดใบ — ใบที่อ่านได้อย่างเดียว</p>
+            <p className="text-sm text-red-900 mt-2 leading-relaxed">
+              เจอโทเคนที่ลงท้ายด้วย <code className="bg-white px-1.5 py-0.5 rounded">READ_ONLY_TOKEN</code> ซึ่ง
+              <strong>อ่านข้อมูลได้แต่เขียนไม่ได้</strong> อาการจะเหมือนฐานข้อมูลเพี้ยน ไม่ใช่เหมือนตั้งค่าผิด
+              <br />
+              ในหน้า Environment Variables ของ Vercel มีโทเคน 2 ใบเรียงกัน ให้ใช้ใบที่ชื่อลงท้ายด้วย{' '}
+              <code className="bg-white px-1.5 py-0.5 rounded">_TOKEN</code> เฉย ๆ (ไม่มีคำว่า READ_ONLY)
             </p>
           </div>
         )}

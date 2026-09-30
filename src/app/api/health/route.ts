@@ -7,6 +7,8 @@ import {
   storeWritable,
   wrongRedisIntegration,
   explainWrongIntegration,
+  readOnlyTokenOnly,
+  explainReadOnlyToken,
 } from '@/lib/db';
 import { getFirebaseInfo } from '@/lib/firebase';
 
@@ -23,7 +25,19 @@ export const dynamic = 'force-dynamic';
  *    และ "Storage" ที่เคยเห็นในหน้าโปรเจกต์ ยังไม่มีถ้ายังไม่ได้ติดตั้งอะไรเลย
  *    ต้องเริ่มจาก Integrations ที่ sidebar ของ dashboard
  */
-function fixSteps(wrongIntegration: boolean): { title: string; steps: string[] } {
+function fixSteps(wrongIntegration: boolean, readOnlyToken = false): { title: string; steps: string[] } {
+  if (readOnlyToken) {
+    return {
+      title: 'ใส่โทเคนผิดใบ — ใบที่ใช้อ่านได้อย่างเดียว',
+      steps: [
+        'Vercel > Settings > Environment Variables (แท็บ Production)',
+        'หาแถวที่ชื่อลงท้ายด้วย _READ_ONLY_TOKEN — นี่คือใบที่เขียนไม่ได้',
+        'ลบแถวนั้นออก แล้วใช้แถวที่ชื่อ KV_REST_API_TOKEN (หรือ UPSTASH_REDIS_REST_TOKEN) แทน',
+        'ตรวจว่าชื่อไม่มีคำว่า READ_ONLY ต่อท้าย',
+        'กลับไป Deployments > Redeploy',
+      ],
+    };
+  }
   if (wrongIntegration) {
     return {
       title: 'ติดตั้ง integration ผิดตัว — Redis ใช้ไม่ได้ ต้องใช้ Upstash',
@@ -64,6 +78,7 @@ export async function GET() {
       usingKv,
       usingFirestore,
       wrongRedisIntegration,
+      readOnlyTokenOnly,
       // บอกด้วยว่า credential มาจากไหน — ถ้ามาจากไฟล์ในเครื่องโดยไม่ตั้งใจ
       // เกมที่ครูสร้างไว้จะดูเหมือนหายไปทั้งที่ยังอยู่
       firebaseSource: firebase.source,
@@ -72,10 +87,12 @@ export async function GET() {
       hint: broken
         ? wrongRedisIntegration
           ? explainWrongIntegration()
-          : `ที่เก็บข้อมูลเขียนไม่ได้ (${perm.reason}) — ถ้า deploy บน Vercel ` +
-            `ต้องติดตั้ง integration "Upstash" ที่ Vercel > Integrations > Marketplace`
+          : readOnlyTokenOnly
+            ? explainReadOnlyToken()
+            : `ที่เก็บข้อมูลเขียนไม่ได้ (${perm.reason}) — ถ้า deploy บน Vercel ` +
+              `ต้องติดตั้ง integration "Upstash" ที่ Vercel > Integrations > Marketplace`
         : undefined,
-      fix: broken ? fixSteps(wrongRedisIntegration) : undefined,
+      fix: broken ? fixSteps(wrongRedisIntegration, readOnlyTokenOnly) : undefined,
       counts: {
         games: db.data.games.length,
         missions: db.data.missions.length,
@@ -93,10 +110,11 @@ export async function GET() {
         usingKv,
         usingFirestore,
         wrongRedisIntegration,
+        readOnlyTokenOnly,
         firebaseSource: firebase.source,
         writable: false,
         hint: `เชื่อมต่อที่เก็บข้อมูลไม่สำเร็จ: ${reason}`,
-        fix: fixSteps(wrongRedisIntegration),
+        fix: fixSteps(wrongRedisIntegration, readOnlyTokenOnly),
       },
       { status: 500 }
     );

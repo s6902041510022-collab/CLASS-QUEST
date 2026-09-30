@@ -72,6 +72,34 @@ export const usingFirestore = isFirebaseConfigured();
  */
 export const wrongRedisIntegration = !usingKv && Boolean(process.env.REDIS_URL);
 
+/**
+ * ตั้ง token แบบอ่านอย่างเดียว — อาการเหมือนระบบเสีย แต่ไม่ใช่
+ *
+ * Upstash ออกโทเคนให้ 2 ใบ: ใบเขียนได้ (ใช้ชื่อ ..._TOKEN) กับใบอ่านอย่างเดียว
+ * (ชื่อ ..._READ_ONLY_TOKEN) ทั้งคู่อยู่ในหน้า Environment Variables ของ Vercel
+ * เรียงติดกันมองเหมือนกัน จึงมีโอกาสสูงที่จะคัดลอกใบผิดมาวาง
+ *
+ * ถ้าใช้ใบอ่านอย่างเดียว: อ่านได้ปกติ แต่ SET/DEL โดนปฏิเสธ
+ * ซึ่งดูจากข้างนอกเหมือนฐานข้อมูลเพี้ยน ไม่ใช่เหมือนตั้ง token ผิด
+ * จึงต้องบอกตรง ๆ ไม่ใช่ปล่อยให้ไปตายเงียบ ๆ
+ */
+export const readOnlyTokenOnly =
+  !usingKv &&
+  Boolean(process.env.KV_REST_API_READ_ONLY_TOKEN || process.env.UPSTASH_REDIS_READ_ONLY_TOKEN) &&
+  Boolean(
+    process.env.KV_REST_API_URL ||
+      process.env.UPSTASH_REDIS_REST_URL
+  );
+
+/** ข้อความบอกว่าใส่โทเคนผิดใบ */
+export function explainReadOnlyToken(): string {
+  return (
+    `ตั้งโทเคนแบบอ่านอย่างเดียว (READ_ONLY_TOKEN) ซึ่งเขียนข้อมูลไม่ได้ ` +
+    `— ต้องใช้โทเคนใบที่เขียนได้ ชื่อ ${KV_URL ? 'KV_REST_API_TOKEN' : 'UPSTASH_REDIS_REST_TOKEN'} ` +
+    `(ดูได้ที่ Vercel > Settings > Environment Variables ชื่อที่ลงท้ายด้วย _TOKEN ไม่มีคำว่า READ_ONLY)`
+  );
+}
+
 /** ข้อความบอกว่าติดตั้ง integration ผิดตัว */
 export function explainWrongIntegration(): string {
   return (

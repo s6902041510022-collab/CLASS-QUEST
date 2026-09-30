@@ -27,6 +27,7 @@ async function loadDb(env) {
       usingKv: db.usingKv,
       usingFirestore: db.usingFirestore,
       wrongRedisIntegration: db.wrongRedisIntegration,
+      readOnlyTokenOnly: db.readOnlyTokenOnly,
       storeLabel: db.storeLabel,
     }));
   `;
@@ -103,4 +104,32 @@ test('ติดตั้งถูกตัว (มี Upstash) ต้องไ�
     false,
     'มีค่าที่ใช้ได้แล้ว ต้องใช้ค่านั้น ไม่ใช่บอกว่าผิด'
   );
+});
+
+// โทเคนอ่านอย่างเดียว: อ่านผ่าน แต่ SET/DEL โดนปฏิเสธ
+// อาการคือ "อ่านได้ แต่เขียนไม่ได้" ซึ่งดูจากข้างนอกเหมือนฐานข้อมูลเพี้ยน
+// ไม่เหมือนคนตั้งค่าผิด ถ้าไม่จับไว้ ผู้ใช้จะเสียเวลาไล่หาสาเหตุที่ไม่ใช่ต้นตอ
+test('ตั้งแต่โทเคนอ่านอย่างเดียว = ต้องถูกจับได้ ไม่ใช่พังเงียบ ๆ', async () => {
+  const db = await loadDb({
+    KV_REST_API_URL: 'https://example.upstash.io',
+    KV_REST_API_READ_ONLY_TOKEN: 'ro',
+  });
+  assert.equal(db.usingKv, false, 'ใบอ่านอย่างเดียวใช้แทนใบเขียนไม่ได้');
+  assert.equal(
+    db.readOnlyTokenOnly,
+    true,
+    'ต้องบอกได้ว่าใส่โทเคนผิดใบ ไม่ใช่ตกไปใช้ไฟล์เหมือนไม่มีอะไรเกิดขึ้น'
+  );
+  assert.equal(db.wrongRedisIntegration, false, 'ไม่ใช่กรณีติดตั้ง integration ผิดเจ้า');
+});
+
+test('ตั้งทั้งสองใบ (อ่านอย่างเดียว + เขียนได้) = ปกติ ไม่ต้องเตือน', async () => {
+  // Upstash ใส่ทั้งสองใบมาให้เสมอ ต้องไม่เตือนมั่วเมื่อใบเขียนได้ใช้งานได้จริง
+  const db = await loadDb({
+    KV_REST_API_URL: 'https://example.upstash.io',
+    KV_REST_API_TOKEN: 'rw',
+    KV_REST_API_READ_ONLY_TOKEN: 'ro',
+  });
+  assert.equal(db.usingKv, true);
+  assert.equal(db.readOnlyTokenOnly, false, 'มีใบเขียนได้แล้วต้องใช้ตัวนั้น ไม่ต้องเตือน');
 });
