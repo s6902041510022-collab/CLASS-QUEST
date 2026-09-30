@@ -39,8 +39,18 @@ const defaultData: DBData = {
 // โหมดที่ 2 (Vercel)                  : เก็บทั้งฐานข้อมูลเป็น JSON ก้อนเดียวใน Redis (Upstash REST)
 // เลือกอัตโนมัติ — ถ้ามี KV_REST_API_URL + KV_REST_API_TOKEN ให้ใช้โหมด Redis
 
-const KV_URL = process.env.KV_REST_API_URL;
-const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+/**
+ * ชื่อ env สำหรับ Upstash REST มีได้หลายแบบ ขึ้นกับว่าติดตั้งผ่านทางไหน
+ *
+ * - Vercel > Integrations > Upstash          -> KV_REST_API_URL / KV_REST_API_TOKEN
+ * - Upstash โดยตรง (นอก Vercel)              -> UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
+ *
+ * รับทั้งสองชื่อ เพราะถ้ารองรับแค่ชื่อเดียว แล้วผู้ใช้ติดตั้งผ่านอีกทาง
+ * ระบบจะเงียบ ๆ ไม่เห็นฐานข้อมูล ตกไปใช้ไฟล์ แล้วพังด้วย EROFS
+ * โดยไม่บอกว่าตั้งค่าไม่ครบ — ซึ่งเป็นปัญหาเดิมที่เสียเวลาแก้ไปแล้ว
+ */
+const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 const KV_KEY = process.env.KV_DB_KEY || 'classquest:db';
 // เก็บข้อมูลไว้ในหน่วยความจำชั่วคราวก่อน เพื่อไม่ให้ยิง Redis บ่อยเกินจำเป็น
 // (นักเรียน 40 คนถามสถานะพร้อมกัน เก็บไว้ 2 วินาที = ลดจำนวนคำสั่งลงเหลือราวหนึ่งในสาม)
@@ -48,6 +58,28 @@ const CACHE_MS = 2000;
 
 export const usingKv = Boolean(KV_URL && KV_TOKEN);
 export const usingFirestore = isFirebaseConfigured();
+
+/**
+ * ติดตั้ง integration ผิดตัว — ต้องรู้ ไม่งั้นจะพังเงียบ ๆ
+ *
+ * Vercel Marketplace มี Redis ให้เลือก 2 เจ้า และคนละโปรโตคอลกัน:
+ * - Upstash  -> KV_REST_API_URL + KV_REST_API_TOKEN (REST)  ← ใช้ได้
+ * - Redis    -> REDIS_URL (redis:// มาตรฐาน, ต้องใช้ TCP client) ← ใช้ไม่ได้
+ *
+ * ถ้าเจอ REDIS_URL แต่ไม่มีค่าของ Upstash แปลว่าผู้ใช้ติดตั้งชื่อผิด
+ * ต้องบอกตรง ๆ ไม่ใช่ปล่อยให้ตกไปใช้ไฟล์แล้วเจอ EROFS
+ * ซึ่งจะทำให้เขาเข้าใจว่าปัญหาอยู่ที่ระบบ ไม่ใช่ที่เลือกผิด integration
+ */
+export const wrongRedisIntegration = !usingKv && Boolean(process.env.REDIS_URL);
+
+/** ข้อความบอกว่าติดตั้ง integration ผิดตัว */
+export function explainWrongIntegration(): string {
+  return (
+    `ตั้ง REDIS_URL ซึ่งเป็น Redis มาตรฐาน (โปรโตคอล TCP) แต่ระบบนี้คุยผ่าน Upstash REST ` +
+    `— โค้ดชุดนี้อ่านได้แค่ KV_REST_API_URL / KV_REST_API_TOKEN ` +
+    `ต้องติดตั้ง integration ชื่อ "Upstash" (ไม่ใช่ "Redis") ที่ Vercel > Integrations > Marketplace`
+  );
+}
 
 export type Store = {
   data: DBData;
@@ -161,10 +193,15 @@ type Backend = {
 function explainWriteFail(err: any): Error {
   const code = err?.code;
   if (code === 'EROFS' || code === 'EACCES' || code === 'EPERM' || code === 'ENOSPC') {
+    // ติดตั้ง integration ผิดตัว = สาเหตุที่เจอบ่อยกว่า และแก้ผิดที่ถ้าไม่บอก
+    if (wrongRedisIntegration) {
+      return new Error(explainWrongIntegration());
+    }
     return new Error(
       `เขียน ${DB_PATH} ไม่ได้ (${code}) — ตอนนี้ใช้ฐานข้อมูลแบบไฟล์ ซึ่งใช้ได้เฉพาะเครื่องที่เขียนไฟล์ได้ ` +
         `(เช่น เครื่องครูที่รัน npm run dev) ถ้า deploy บน Vercel หรือระบบที่ filesystem เป็น read-only ` +
-        `ต้องตั้ง KV_REST_API_URL และ KV_REST_API_TOKEN (Vercel KV / Upstash Redis) ให้ระบบใช้ Redis แทน`
+        `ต้องติดตั้ง integration "Upstash" ที่ Vercel > Integrations > Marketplace ` +
+        `(ซึ่งจะใส่ KV_REST_API_URL และ KV_REST_API_TOKEN ให้เอง) ให้ระบบใช้ Redis แทน`
     );
   }
   return err instanceof Error ? err : new Error(String(err));

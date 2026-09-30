@@ -1,5 +1,13 @@
 import { NextResponse } from 'next/server';
-import { getDb, usingKv, usingFirestore, storeLabel, storeWritable } from '@/lib/db';
+import {
+  getDb,
+  usingKv,
+  usingFirestore,
+  storeLabel,
+  storeWritable,
+  wrongRedisIntegration,
+  explainWrongIntegration,
+} from '@/lib/db';
 import { getFirebaseInfo } from '@/lib/firebase';
 
 export const dynamic = 'force-dynamic';
@@ -8,18 +16,37 @@ export const dynamic = 'force-dynamic';
  * ขั้นตอนแก้เมื่อที่เก็บข้อมูลใช้ไม่ได้
  *
  * ทำเป็นข้อมูลโครงสร้าง (ไม่ใช่ข้อความยาว ๆ) เพราะหน้า /setup ต้องเอาไปแสดง
- * และต้องอัปเดตตามสถานะจริง เช่น ถ้าใช้ Firestore อยู่ขั้นตอนจะต่างจาก Redis
+ * และต้องอัปเดตตามสถานะจริง
+ *
+ * ⚠️ ขั้นตอนชุดนี้เขียนตาม UI ของ Vercel ณ ก.ย. 2026
+ *    Vercel KV ถูกยกเลิกไปแล้ว (ธ.ค. 2024) เปลี่ยนเป็น Marketplace
+ *    และ "Storage" ที่เคยเห็นในหน้าโปรเจกต์ ยังไม่มีถ้ายังไม่ได้ติดตั้งอะไรเลย
+ *    ต้องเริ่มจาก Integrations ที่ sidebar ของ dashboard
  */
-function fixSteps(reason?: string): { title: string; steps: string[] } {
-  const base = [
-    'เข้า vercel.com → เลือกโปรเจกต์ class-quest',
-    'แท็บ Storage → Create Database → เลือก KV (Upstash Redis)',
-    'กด Connect to project (เลือก Environment: Production + Preview แล้วกด Connect)',
-    'กด Redeploy (สำคัญ — เปลี่ยนค่า env แล้ว deployment ที่รันอยู่จะไม่เปลี่ยน)',
-  ];
+function fixSteps(wrongIntegration: boolean): { title: string; steps: string[] } {
+  if (wrongIntegration) {
+    return {
+      title: 'ติดตั้ง integration ผิดตัว — Redis ใช้ไม่ได้ ต้องใช้ Upstash',
+      steps: [
+        'Vercel > Integrations (sidebar ซ้าย) > Browse Marketplace',
+        'ค้นหา "Upstash" แล้วกด Install  (อย่าเลือกชื่อ "Redis" — เป็นคนละโปรโตคอล)',
+        'เลือกแผนราคา (Free) > Continue > ตั้งชื่อฐานข้อมูล > Create',
+        'ไปที่ Products > ชื่อฐานข้อมูลของคุณ > แท็บ Projects > Connect Project > เลือก class-quest',
+        'ติ๊ก Environment: Production + Preview แล้วกด Connect',
+        'กลับไป Deployments > Redeploy (เปลี่ยนค่า env แล้ว deployment ที่รันอยู่จะไม่เปลี่ยน)',
+      ],
+    };
+  }
   return {
     title: 'ตั้งฐานข้อมูลบนเว็บ (ทำครั้งเดียว)',
-    steps: base,
+    steps: [
+      'Vercel > Integrations (sidebar ซ้าย) > Browse Marketplace',
+      'ค้นหา "Upstash" แล้วกด Install  (ชื่อ "Redis" ใช้ไม่ได้ เพราะเป็นคนละโปรโตคอล)',
+      'เลือกแผนราคา (Free) > Continue > ตั้งชื่อฐานข้อมูล > Create',
+      'ไปที่ Products > ชื่อฐานข้อมูลของคุณ > แท็บ Projects > Connect Project > เลือก class-quest',
+      'ติ๊ก Environment: Production + Preview แล้วกด Connect',
+      'กลับไป Deployments > Redeploy (สำคัญ — เปลี่ยนค่า env แล้ว deployment ที่รันอยู่จะไม่เปลี่ยน)',
+    ],
   };
 }
 
@@ -36,16 +63,19 @@ export async function GET() {
       store: storeLabel,
       usingKv,
       usingFirestore,
+      wrongRedisIntegration,
       // บอกด้วยว่า credential มาจากไหน — ถ้ามาจากไฟล์ในเครื่องโดยไม่ตั้งใจ
       // เกมที่ครูสร้างไว้จะดูเหมือนหายไปทั้งที่ยังอยู่
       firebaseSource: firebase.source,
       writable: perm.writable,
       // ถ้าเขียนไม่ได้ ให้บอกด้วยว่าต้องทำอะไรต่อ ไม่ใช่แค่รหัส error
       hint: broken
-        ? `ที่เก็บข้อมูลเขียนไม่ได้ (${perm.reason}) — ถ้า deploy บน Vercel ต้องตั้ง ` +
-          `KV_REST_API_URL และ KV_REST_API_TOKEN (Vercel KV / Upstash Redis)`
+        ? wrongRedisIntegration
+          ? explainWrongIntegration()
+          : `ที่เก็บข้อมูลเขียนไม่ได้ (${perm.reason}) — ถ้า deploy บน Vercel ` +
+            `ต้องติดตั้ง integration "Upstash" ที่ Vercel > Integrations > Marketplace`
         : undefined,
-      fix: broken ? fixSteps(perm.reason) : undefined,
+      fix: broken ? fixSteps(wrongRedisIntegration) : undefined,
       counts: {
         games: db.data.games.length,
         missions: db.data.missions.length,
@@ -62,10 +92,11 @@ export async function GET() {
         store: storeLabel,
         usingKv,
         usingFirestore,
+        wrongRedisIntegration,
         firebaseSource: firebase.source,
         writable: false,
         hint: `เชื่อมต่อที่เก็บข้อมูลไม่สำเร็จ: ${reason}`,
-        fix: fixSteps(reason),
+        fix: fixSteps(wrongRedisIntegration),
       },
       { status: 500 }
     );

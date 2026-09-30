@@ -18,6 +18,7 @@ type Health = {
   store?: string;
   usingKv?: boolean;
   usingFirestore?: boolean;
+  wrongRedisIntegration?: boolean;
   firebaseSource?: string | null;
   writable?: boolean;
   hint?: string;
@@ -86,6 +87,21 @@ export default function SetupPage() {
             </>
           )}
         </div>
+
+        {/* ติดตั้ง integration ผิดตัว — Redis ใช้ไม่ได้ ต้องเป็น Upstash
+            เคสนี้ทำให้ตอนนี้ไม่ต้องตั้งค่าใหม่ เพราะติดตั้งไปแล้ว แต่เป็นชื่อผิด */}
+        {data?.wrongRedisIntegration && (
+          <div className="rounded-xl border border-red-300 bg-red-50 p-5">
+            <p className="font-semibold text-red-800">ติดตั้งฐานข้อมูลผิดตัว</p>
+            <p className="text-sm text-red-900 mt-2 leading-relaxed">
+              เจอ <code className="bg-white px-1.5 py-0.5 rounded">REDIS_URL</code> ซึ่งเป็น Redis
+              มาตรฐาน (โปรโตคอล TCP) แต่ระบบนี้คุยผ่าน Upstash REST
+              <br />
+              ต้องถอด integration ที่ติดตั้งไปออก แล้วติดตั้งใหม่ชื่อ <strong>Upstash</strong> แทน
+              (ชื่อ &quot;Redis&quot; ใช้ไม่ได้)
+            </p>
+          </div>
+        )}
 
         {/* เตือนเรื่องไฟล์ credential ที่ทำให้ข้อมูลดูหาย */}
         {strayFirestore && (
