@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { isTeacherLoggedIn } from '@/lib/auth';
+import { getTeacherSession } from '@/lib/auth';
 import { BOSS_DAMAGE_PER_CORRECT } from '@/lib/utils';
 import { TASK_KINDS, normalizeKind, blankTask, type TaskKind } from '@/lib/mission-tasks';
 import TeacherHeader from '@/components/TeacherHeader';
@@ -113,11 +113,13 @@ function MissionsBuilder() {
   }, []);
 
   useEffect(() => {
-    if (!isTeacherLoggedIn()) {
-      router.replace('/teacher/login');
-      return;
-    }
-    loadMissions(gameId);
+    getTeacherSession().then((session) => {
+      if (!session) {
+        router.replace('/teacher/login');
+        return;
+      }
+      loadMissions(gameId);
+    });
   }, [router, gameId, loadMissions]);
 
   const currentGame = games.find((g) => g.id === gameId);

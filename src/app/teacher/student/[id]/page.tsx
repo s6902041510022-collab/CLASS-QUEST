@@ -56,13 +56,16 @@ function StudentAnalysis({ params }: { params: { id: string } }) {
   };
 
   useEffect(() => {
-    if (!getTeacherSession()) {
-      router.replace('/teacher/login');
-      return;
-    }
     if (!studentId) return;
     let cancelled = false;
     (async () => {
+      // คุกกี้เซสชันเป็น HttpOnly อ่านจาก JS ไม่ได้ จึงต้องถามเซิร์ฟเวอร์ก่อน
+      const session = await getTeacherSession();
+      if (cancelled) return;
+      if (!session) {
+        router.replace('/teacher/login');
+        return;
+      }
       await load();
       if (!cancelled) setLoading(false);
     })();

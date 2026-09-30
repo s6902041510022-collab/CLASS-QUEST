@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, constants } from 'fs';
+﻿import { existsSync, readFileSync, constants } from 'fs';
 import { access, mkdir, readFile, writeFile } from 'fs/promises';
 import { dirname } from 'path';
 import path from 'path';
@@ -10,6 +10,39 @@ import { isFirebaseConfigured, getFirestoreDb } from './firebase';
 const DB_PATH = path.join(process.cwd(), 'data', 'db.json');
 const DB_SEED_PATH = path.join(process.cwd(), 'data', 'db.default.json');
 
+/**
+ * บัญชีครู — เก็บในตัวแรกของ teachers
+ *
+ * เดิมช่องนี้เก็บครูคนเดียว (ไม่มีรหัสผ่าน) ตอนนี้เก็บได้หลายคน
+ * ของเก่าที่ยังไม่มี username/passwordHash ถือว่าเป็นบัญชีที่ยังเข้าไม่ได้
+ * และจะถูกผูกให้กับครูคนแรกที่สมัคร (ดู adoptLegacyTeacher)
+ */
+export type TeacherAccount = {
+  id: string;
+  username: string;
+  name: string;
+  avatar: string;
+  /** ผลจาก hashPassword() — ห้ามเก็บรหัสผ่านดิบเด็ดขาด */
+  passwordHash: string;
+  createdAt: string;
+};
+
+/** โทเคนการเข้าสู่ระบบ เก็บไว้ฝั่งเซิร์ฟเวอร์ ไม่ใช่ในคุกกี้แบบอ่านได้ */
+export type AuthSession = {
+  /**
+   * คีย์สำหรับ mergeValue — ต้องมี ไม่งั้นเซสชันของครูสองคนที่ล็อกอินพร้อมกัน
+   * จะหั่นทิ้งอันหนึ่ง (คนที่โชคดีกว่าคนที่โชคร้ายจะถูกเด้งออกจากระบบทันที)
+   *
+   * ใช้ค่าเดียวกับ token เพราะ token มีเอกลักษณ์อยู่แล้ว ไม่ต้องคิด id แยก
+   * ดูรายละเอียดที่ mergeValue()
+   */
+  id?: string;
+  token: string;
+  accountId: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
 export type DBData = {
   games: any[];
   missions: any[];
@@ -17,9 +50,13 @@ export type DBData = {
   players: any[];
   sessions: any[];
   teams: any[];
-  teachers: any[];
+  teachers: TeacherAccount[];
+  authSessions: AuthSession[];
   groups: any[];
-  settings: { teacherPin: string; teacherName?: string; [key: string]: any };
+  // ⚠️ ไม่มี teacherPin อีกแล้ว — เดิมเป็น PIN 4 หลักที่ตั้งไว้ทั้งระบบ (คนเดียวทั้งชั้น)
+  //    ตอนนี้ครูแต่ละคนมี username + password ของตัวเองใน teachers[]
+  //    เก็บรหัสผ่านไว้ที่เดียวทั้งระบบคือช่องโหว่: รหัสเดียวหลุด = ทุกคนเข้าได้
+  settings: { teacherName?: string; [key: string]: any };
 };
 
 const defaultData: DBData = {
@@ -30,9 +67,13 @@ const defaultData: DBData = {
   sessions: [],
   teams: [],
   teachers: [],
+  authSessions: [],
   groups: [],
-  settings: { teacherPin: '1234', teacherName: '' },
+  settings: { teacherName: '' },
 };
+
+/** อายุเซสชัน 30 วัน — ครูเปิดเว็บใช้ตลอดเทอมไม่ต้องล็อกอินบ่อย */
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 // ==================== ที่เก็บข้อมูล ====================
 // โหมดที่ 1 (คอมพิวเตอร์ครู / dev) : เขียนไฟล์ data/db.json
@@ -128,10 +169,6 @@ function normalize(data: any): { data: DBData; changed: boolean } {
       out[key] = clone((defaultData as any)[key]);
       changed = true;
     }
-  }
-  if (!out.settings.teacherPin) {
-    out.settings.teacherPin = '1234';
-    changed = true;
   }
   return { data: out as DBData, changed };
 }
@@ -440,6 +477,13 @@ function mergeValue(orig: any, mine: any, other: any): any {
     // อาร์เรย์ที่ไม่มี id ให้เลย (เช่น คู่จับคู่ { a, b }) — รวมทีละรายการไม่ได้
     // เพราะหา "รายการนี้คือรายการเดิม" ไม่ได้ ถ้าบังคับรวมจะทำให้ข้อมูลที่แก้หายเงียบ ๆ
     // จึงต้องเทียบทั้งก้อน คล้ายอาร์เรย์ของค่าพื้นฐาน
+    //
+    // ⚠️ นี่คือกับดักที่ทำให้ "ข้อมูลหายเงียบ" ได้จริง
+    //   ถ้าสองคนเขียนพร้อมกันและแต่ละฝ่ายต่างเพิ่มของตัวเอง ผลคือฝั่งที่เขียนทีหลัง
+    //   ทับอาร์เรย์ทั้งก้อนของอีกฝ่าย (return mine) — ของที่อีกคนเพิ่งเพิ่มหายไป
+    //   อาการคือ "ครูล็อกอินแล้วถูกเด้งออกจากระบบทันที" โดยไม่มีอะไรฟ้อง
+    //   ทางแก้: ทุกอาร์เรย์ที่เขียนพร้อมกันได้ต้องมี id ชัดเจน
+    //   (authSessions เคยพลาดตรงนี้ — เพิ่ม id: token ไปแล้ว)
     const hasId = (arr: any): boolean => arr.some((r: any) => idOf(r) !== null);
     if (!hasId(mine) && !hasId(other) && !hasId(Array.isArray(orig) ? orig : [])) {
       if (same(mine, orig)) return other; // เราไม่ได้แก้
@@ -484,11 +528,28 @@ function mergeValue(orig: any, mine: any, other: any): any {
 
 // ==================== GAMES ====================
 
-export async function createGame(data: any) {
+/** เกมนี้เป็นของครูคนนี้จริงไหม — ฐานของการไม่ให้ข้อมูลข้ามบัญชี */
+const isOwned = (row: any, ownerId: string) => Boolean(row) && row.ownerId === ownerId;
+
+/**
+ * เกมเป็นของครูคนนี้ไหม
+ *
+ * ใช้ในทุกฟังก์ชันที่รับ gameId ก่อนแตะข้อมูลที่ผูกกับเกม
+ * คืน false ถ้าไม่มีเกมนี้อยู่ด้วย — เพราะ "ไม่มี" กับ "ไม่ใช่ของคุณ" ต้องตอบเหมือนกัน
+ * ไม่งั้นคนอื่นจะเดาว่ามีเกม id นี้จริงหรือเปล่า
+ */
+async function gameBelongsTo(gameId: string, ownerId: string): Promise<boolean> {
+  if (!gameId || !ownerId) return false;
+  const game = (await getDb()).data.games.find((g: any) => g.id === gameId);
+  return isOwned(game, ownerId);
+}
+
+export async function createGame(data: any, ownerId: string) {
   const db = await getDb();
   const game = {
     id: uuidv4(),
     ...data,
+    ownerId, // กำหนดที่นี่เสมอ ไม่รับจากข้อมูลที่ส่งเข้ามา — ไม่งั้นส่ง ownerId มาเองได้
     status: 'draft',
     roomCode: generateRoomCode(),
     createdAt: new Date().toISOString(),
@@ -499,27 +560,46 @@ export async function createGame(data: any) {
   return game;
 }
 
+/**
+ * หาเกมโดยไม่ตรวจเจ้าของ — ใช้ได้เฉพาะฝั่งนักเรียนที่เข้าห้องด้วยรหัสห้อง
+ *
+ * ⚠️ ห้ามใช้ในหน้าของครู ต้องใช้ requireOwnedGame แทน เพราะฟังก์ชันนี้คืนเกมของทุกคน
+ */
 export const getGame = async (id: string) =>
   (await getDb()).data.games.find((g: any) => g.id === id);
 
+/** เกมของครูคนนี้เท่านั้น — คืน null ถ้าไม่มีหรือไม่ใช่ของครู */
+export const getOwnedGame = async (id: string, ownerId: string) => {
+  if (!id || !ownerId) return null;
+  const game = (await getDb()).data.games.find((g: any) => g.id === id);
+  return isOwned(game, ownerId) ? game : null;
+};
+
+/**
+ * เกมจากรหัสห้อง
+ *
+ * รหัสห้อง 6 หลักสุ่มใหม่ทุกครั้งที่สร้างเกม จึงถือเป็นตัวแยกแยะได้
+ * ข้ามบัญชีไม่ได้ (ยกเว้นเดาชนะ ซึ่งโอกาสต่ำมาก)
+ */
 export const getGameByRoomCode = async (code: string) =>
   (await getDb()).data.games.find((g: any) => g.roomCode === code);
 
-export const getAllGames = async () => (await getDb()).data.games;
+export const getAllGames = async (ownerId: string) =>
+  (await getDb()).data.games.filter((g: any) => isOwned(g, ownerId));
 
-export async function updateGame(id: string, updates: any) {
+export async function updateGame(id: string, updates: any, ownerId: string) {
   const db = await getDb();
   const i = db.data.games.findIndex((g: any) => g.id === id);
-  if (i === -1) return null;
+  if (i === -1 || !isOwned(db.data.games[i], ownerId)) return null;
   db.data.games[i] = { ...db.data.games[i], ...updates, updatedAt: new Date().toISOString() };
   await db.write();
   return db.data.games[i];
 }
 
-export async function deleteGame(id: string) {
+export async function deleteGame(id: string, ownerId: string) {
   const db = await getDb();
   const i = db.data.games.findIndex((g: any) => g.id === id);
-  if (i === -1) return false;
+  if (i === -1 || !isOwned(db.data.games[i], ownerId)) return false;
   db.data.games.splice(i, 1);
   db.data.missions = db.data.missions.filter((m: any) => m.gameId !== id);
   db.data.players = db.data.players.filter((p: any) => p.gameId !== id);
@@ -531,7 +611,8 @@ export async function deleteGame(id: string) {
 
 // ==================== MISSIONS ====================
 
-export async function createMission(data: any) {
+export async function createMission(data: any, ownerId: string) {
+  if (!(await gameBelongsTo(data.gameId, ownerId))) return null;
   const db = await getDb();
   const count = db.data.missions.filter((m: any) => m.gameId === data.gameId).length;
   const mission = {
@@ -546,7 +627,8 @@ export async function createMission(data: any) {
   return mission;
 }
 
-export async function getMissions(gameId: string) {
+export async function getMissions(gameId: string, ownerId: string) {
+  if (!(await gameBelongsTo(gameId, ownerId))) return [];
   return (await getDb()).data.missions
     .filter((m: any) => m.gameId === gameId)
     .sort((a: any, b: any) => a.order - b.order);
@@ -556,7 +638,8 @@ export async function getMissions(gameId: string) {
  * Mission ที่ใช้เล่นจริง (ไม่รวมด่านบอส) — ใช้จบรอบควิซแล้วค่อยเข้าบอส
  * เรียงตาม order เหมือนการ์ดครูมองเห็น
  */
-export async function getQuizMissions(gameId: string) {
+export async function getQuizMissions(gameId: string, ownerId: string) {
+  if (!(await gameBelongsTo(gameId, ownerId))) return [];
   return (await getDb()).data.missions
     .filter((m: any) => m.gameId === gameId && m.type !== 'boss')
     .sort((a: any, b: any) => a.order - b.order);
@@ -572,41 +655,66 @@ export function sortMissionsForPlay(list: any[]) {
     .sort((a: any, b: any) => (a.type === 'boss' ? 1 : 0) - (b.type === 'boss' ? 1 : 0));
 }
 
-export const getMission = async (id: string) =>
-  (await getDb()).data.missions.find((m: any) => m.id === id);
+export const getMission = async (id: string, ownerId: string) => {
+  if (!id || !ownerId) return null;
+  const db = await getDb();
+  const mission = db.data.missions.find((m: any) => m.id === id);
+  if (!mission) return null;
+  return (await gameBelongsTo(mission.gameId, ownerId)) ? mission : null;
+};
 
-export async function updateMission(id: string, updates: any) {
+export async function updateMission(id: string, updates: any, ownerId: string) {
   const db = await getDb();
   const i = db.data.missions.findIndex((m: any) => m.id === id);
   if (i === -1) return null;
+  if (!(await gameBelongsTo(db.data.missions[i].gameId, ownerId))) return null;
   db.data.missions[i] = { ...db.data.missions[i], ...updates, updatedAt: new Date().toISOString() };
   await db.write();
   return db.data.missions[i];
 }
 
-export async function deleteMission(id: string) {
+export async function deleteMission(id: string, ownerId: string) {
   const db = await getDb();
   const i = db.data.missions.findIndex((m: any) => m.id === id);
   if (i === -1) return false;
+  if (!(await gameBelongsTo(db.data.missions[i].gameId, ownerId))) return false;
   db.data.missions.splice(i, 1);
   await db.write();
   return true;
 }
 
 // ==================== STUDENTS (รายชื่อนักเรียน) ====================
+//
+// ⚠️ นักเรียนของแต่ละครูแยกกัน และ "ชื่อเดียวกัน" ของคนละครูต้องไม่ชนกัน
+//    ถ้าไม่แยก ครู A จะเห็นนักเรียนของครู B และแก้คะแนนเขาได้
 
-export const getStudents = async () => (await getDb()).data.students;
-export const getStudent = async (id: string) =>
-  (await getDb()).data.students.find((s: any) => s.id === id);
+export const getStudents = async (ownerId: string) =>
+  (await getDb()).data.students.filter((s: any) => isOwned(s, ownerId));
 
-export const findStudentByName = async (name: string) => {
-  const t = name.trim().toLowerCase();
-  return (await getDb()).data.students.find((s: any) => s.name.trim().toLowerCase() === t);
+/**
+ * หานักเรียน — ต้องระบุเจ้าของเสมอ
+ *
+ * มี ownerId เป็นพารามิเตอร์บังคับ (ไม่ optional) เพราะเคยมีช่องโหว่ตรงนี้:
+ * หน้าเข้าห้องของนักเรียนรับ studentId มาแล้วเอาไปใช้ตรง ๆ
+ * ทำให้นักเรียนของครูหนึ่งเข้าห้องของอีกครูหนึ่งได้
+ */
+export const getStudent = async (id: string, ownerId: string) => {
+  if (!id || !ownerId) return null;
+  const found = (await getDb()).data.students.find((s: any) => s.id === id);
+  return isOwned(found, ownerId) ? found : null;
 };
 
-function newStudent(name: string, avatar: string) {
+export const findStudentByName = async (name: string, ownerId: string) => {
+  const t = name.trim().toLowerCase();
+  return (await getDb()).data.students.find(
+    (s: any) => isOwned(s, ownerId) && s.name.trim().toLowerCase() === t
+  );
+};
+
+function newStudent(name: string, avatar: string, ownerId: string) {
   return {
     id: uuidv4(),
+    ownerId,
     name: name.trim(),
     avatar: avatar || '🦊',
     totalXp: 0,
@@ -619,40 +727,44 @@ function newStudent(name: string, avatar: string) {
   };
 }
 
-export async function createStudent(data: any) {
+export async function createStudent(data: any, ownerId: string) {
   const db = await getDb();
-  const existing = data.name ? await findStudentByName(data.name) : undefined;
+  const existing = data.name ? await findStudentByName(data.name, ownerId) : undefined;
   if (existing) return existing;
-  const student = newStudent(data.name, data.avatar);
+  const student = newStudent(data.name, data.avatar, ownerId);
   db.data.students.push(student);
   await db.write();
   return student;
 }
 
 // เพิ่มรายชื่อนักเรียน (ครูเพิ่มเอง)
-export async function addStudent(name: string, avatar = '🦊') {
+export async function addStudent(name: string, ownerId: string, avatar = '🦊') {
   const db = await getDb();
-  const existing = await findStudentByName(name);
+  const existing = await findStudentByName(name, ownerId);
   if (existing) return existing;
-  const student = newStudent(name, avatar);
+  const student = newStudent(name, avatar, ownerId);
   db.data.students.push(student);
   await db.write();
   return student;
 }
 
-export async function updateStudent(id: string, updates: any) {
+export async function updateStudent(id: string, updates: any, ownerId: string) {
   const db = await getDb();
   const i = db.data.students.findIndex((s: any) => s.id === id);
   if (i === -1) return null;
-  db.data.students[i] = { ...db.data.students[i], ...updates, lastSeenAt: new Date().toISOString() };
+  if (!isOwned(db.data.students[i], ownerId)) return null;
+  // ownerId เปลี่ยนเองไม่ได้ — ถ้าปล่อยไว้ ใครส่งมาก็ย้ายเจ้าของของนักเรียนคนอื่นได้
+  const { ownerId: _ignored, ...safe } = updates || {};
+  db.data.students[i] = { ...db.data.students[i], ...safe, lastSeenAt: new Date().toISOString() };
   await db.write();
   return db.data.students[i];
 }
 
-export async function deleteStudent(id: string) {
+export async function deleteStudent(id: string, ownerId: string) {
   const db = await getDb();
   const i = db.data.students.findIndex((s: any) => s.id === id);
   if (i === -1) return false;
+  if (!isOwned(db.data.students[i], ownerId)) return false;
   db.data.students.splice(i, 1);
   // ลบคะแนน/รอบการเล่นของคนนี้ไปด้วย (กันคะแนนค้างในเกม/รอบที่ลบชื่อไปแล้ว)
   db.data.players = db.data.players.filter((p: any) => p.studentId !== id);
@@ -662,35 +774,47 @@ export async function deleteStudent(id: string) {
 
 // ==================== GROUPS (ห้องเรียน/โฟลเดอร์) ====================
 
-export const getGroups = async () => (await getDb()).data.groups;
+export const getGroups = async (ownerId: string) =>
+  (await getDb()).data.groups.filter((g: any) => isOwned(g, ownerId));
 
-export async function addGroup(name: string) {
+export async function addGroup(name: string, ownerId: string) {
   const db = await getDb();
   const trimmed = String(name).trim();
   if (!trimmed) return null;
-  const dup = db.data.groups.find((g: any) => String(g.name).trim() === trimmed);
+  const dup = db.data.groups.find(
+    (g: any) => isOwned(g, ownerId) && String(g.name).trim() === trimmed
+  );
   if (dup) return dup;
-  const group = { id: uuidv4(), name: trimmed, createdAt: new Date().toISOString() };
+  const group = {
+    id: uuidv4(),
+    ownerId,
+    name: trimmed,
+    createdAt: new Date().toISOString(),
+  };
   db.data.groups.push(group);
   await db.write();
   return group;
 }
 
-export async function deleteGroup(id: string) {
+export async function deleteGroup(id: string, ownerId: string) {
   const db = await getDb();
   const i = db.data.groups.findIndex((g: any) => g.id === id);
   if (i === -1) return false;
+  if (!isOwned(db.data.groups[i], ownerId)) return false;
   db.data.groups.splice(i, 1);
-  // นักเรียนในห้องนั้นกลับไป "ไม่มีห้อง"
+  // นักเรียนในห้องนั้นกลับไป "ไม่มีห้อง" — แต่ต้องเป็นของครูคนเดียวกันเท่านั้น
   db.data.students.forEach((s: any) => {
-    if (s.groupId === id) s.groupId = '';
+    if (s.groupId === id && isOwned(s, ownerId)) s.groupId = '';
   });
   await db.write();
   return true;
 }
 
-export async function getStudentHistory(studentId: string) {
+export async function getStudentHistory(studentId: string, ownerId: string) {
   const db = await getDb();
+  // เช็คเจ้าของก่อน ไม่งั้นใครก็ดูประวัติการเล่นของนักเรียนที่เดา id ได้
+  const student = db.data.students.find((s: any) => s.id === studentId);
+  if (!isOwned(student, ownerId)) return [];
   return db.data.players
     .filter((p: any) => p.studentId === studentId)
     .sort((a: any, b: any) => String(b.joinedAt).localeCompare(String(a.joinedAt)))
@@ -835,9 +959,15 @@ export function advancePlayerPosition(db: any, player: any): void {
 }
 
 // นำคะแนนของรอบหนึ่งเข้าสถิติถาวร (กันนับซ้ำด้วย completedSessions)
+//
+// ฟังก์ชันนี้ถูกเรียกจากฝั่งนักเรียนตอนตอบคำถาม จึงไม่มี ownerId มาให้
+// ต้องหาเจ้าของจากเกมที่ผู้เล่นคนนี้อยู่ — ซึ่งเชื่อถือได้ เพราะผู้เล่นถูกสร้างจากการเข้าห้อง
+// ที่ผ่านการตรวจแล้วว่านักเรียนเป็นของครูคนนั้น (ดู POST /api/players)
 export async function rollUp(studentId: string | undefined, sessionId: string, player: any) {
   if (!studentId) return;
-  const student = await getStudent(studentId);
+  const ownerId = (await getGame(player?.gameId))?.ownerId;
+  if (!ownerId) return; // ผู้เล่นไม่ผูกกับเกมที่มีเจ้าของ — ไม่แตะข้อมูลนักเรียน
+  const student = await getStudent(studentId, ownerId);
   if (!student) return;
   if ((student.completedSessions || []).includes(sessionId)) return;
   await updateStudent(studentId, {
@@ -846,7 +976,7 @@ export async function rollUp(studentId: string | undefined, sessionId: string, p
     correctAnswers: (student.correctAnswers || 0) + (player.correctAnswers || 0),
     totalAnswers: (student.totalAnswers || 0) + (player.totalAnswers || 0),
     completedSessions: [...(student.completedSessions || []), sessionId],
-  });
+  }, ownerId);
 }
 
 /**
@@ -1141,26 +1271,202 @@ export async function updateSessionLive(gameId: string, updates: any) {
 
 // ==================== TEACHER & SETTINGS ====================
 
-export async function getTeacher() {
-  const db = await getDb();
-  if (db.data.teachers.length > 0) return db.data.teachers[0];
-  return { id: 'default', name: db.data.settings.teacherName || '', avatar: '👨‍🏫' };
+// ==================== บัญชีครู (หลายคน) ====================
+//
+// ⚠️ กฎของระบบนี้: ทุกอย่างที่ครูเป็นเจ้าของต้องมี ownerId
+//   เกม / นักเรียน / กลุ่ม  -> มี ownerId ตรง ๆ
+//   ภารกิจ / ผู้เล่น / เซสชันเกม / ทีม -> ไม่ต้องมี เพราะเดินทางผ่านเกมเสมอ
+//   แต่ต้อง "ตรวจว่าเกมนั้นเป็นของใคร" ก่อนเสมอ ทุกฟังก์ชันที่รับ gameId
+//   จึงบังคับให้ส่ง ownerId มาด้วย — TypeScript จะช่วยตอบให้ว่าลืมตรงไหน
+//   ถ้าไม่บังคับ จะมีจุดที่มองข้ามสิทธิ์แล้วไม่รู้ตัว ซึ่งอันตรายกว่าที่คิด
+
+import { hashPassword, verifyPassword, normalizeUsername } from './accounts';
+
+/** บัญชีที่เข้าสู่ระบบได้จริง (มี username + passwordHash) */
+export const isUsableAccount = (a: any): a is TeacherAccount =>
+  Boolean(a && a.id && a.username && a.passwordHash);
+
+export async function getAccountById(id: string): Promise<TeacherAccount | null> {
+  if (!id) return null;
+  const found = (await getDb()).data.teachers.find((t: any) => t.id === id);
+  return isUsableAccount(found) ? found : null;
 }
 
-export async function saveTeacher(data: any) {
+export async function getAccountByUsername(username: string): Promise<TeacherAccount | null> {
+  const key = normalizeUsername(username);
+  if (!key) return null;
+  const found = (await getDb()).data.teachers.find(
+    (t: any) => normalizeUsername(t.username) === key
+  );
+  return isUsableAccount(found) ? found : null;
+}
+
+export async function countAccounts(): Promise<number> {
+  return (await getDb()).data.teachers.filter(isUsableAccount).length;
+}
+
+/**
+ * สมัครบัญชีครูใหม่
+ *
+ * ครั้งแรกที่มีคนสมัคร ระบบจะดูดข้อมูลเดิม (เกม/นักเรียนที่ครูเคยสร้างไว้ตอนใช้ PIN เดิม)
+ * มาผูกให้เขา ไม่งั้นข้อมูลที่ทำไว้เสียเปล่า
+ */
+export async function registerAccount(input: {
+  username: string;
+  password: string;
+  name: string;
+  avatar?: string;
+}): Promise<TeacherAccount> {
   const db = await getDb();
-  if (db.data.teachers.length === 0) {
-    db.data.teachers.push({ id: uuidv4(), name: String(data.name || '').trim(), avatar: data.avatar || '👨‍🏫' });
-  } else {
-    db.data.teachers[0] = { ...db.data.teachers[0], name: String(data.name || '').trim(), avatar: data.avatar || db.data.teachers[0].avatar };
+  const username = normalizeUsername(input.username);
+
+  if (db.data.teachers.some((t: any) => normalizeUsername(t.username) === username)) {
+    throw new Error('ชื่อผู้ใช้นี้ถูกใช้ไปแล้ว ลองชื่ออื่น');
   }
-  db.data.settings.teacherName = String(data.name || '').trim();
+
+  // บัญชีเดิม (จากยุคใช้ PIN) มี teacher 1 รายการแต่ไม่มีรหัสผ่าน
+  // ให้รายนี้กลายเป็นบัญชีจริงแทน แล้วย้ายของเดิมที่ยังไม่มีเจ้าของมาคิดกับเขา
+  const legacyIndex = db.data.teachers.findIndex((t: any) => !isUsableAccount(t));
+  const id = uuidv4();
+  const name = String(input.name || '').trim();
+  const account: TeacherAccount = {
+    id,
+    username,
+    name,
+    avatar: input.avatar || '👨‍🏫',
+    passwordHash: hashPassword(input.password),
+    createdAt: new Date().toISOString(),
+  };
+
+  if (legacyIndex >= 0) {
+    db.data.teachers[legacyIndex] = { ...db.data.teachers[legacyIndex], ...account };
+  } else {
+    db.data.teachers.push(account);
+  }
+
+  // ของที่ยังไม่มีเจ้าของ = ของครูคนแรก (ข้อมูลจากยุคก่อนมีระบบบัญชี)
+  const claimed = { games: 0, students: 0, groups: 0 };
+  for (const g of db.data.games as any[]) {
+    if (!g.ownerId) { g.ownerId = id; claimed.games++; }
+  }
+  for (const s of db.data.students as any[]) {
+    if (!s.ownerId) { s.ownerId = id; claimed.students++; }
+  }
+  for (const gr of db.data.groups as any[]) {
+    if (!gr.ownerId) { gr.ownerId = id; claimed.groups++; }
+  }
+  (db.data as any).__claimed = claimed;
+
   await db.write();
-  return db.data.teachers[0];
+  return account;
 }
 
-export async function verifyPin(pin: string) {
-  return pin === (await getDb()).data.settings.teacherPin;
+/**
+ * ตรวจชื่อผู้ใช้ + รหัสผ่าน
+ *
+ * คืน null เมื่อไม่ผ่าน โดยไม่บอกว่า "ชื่อผู้ใช้ไม่มี" หรือ "รหัสผ่านผิด"
+ * เพราะการบอกต่างกันไปทีละอย่าง เป็นช่องที่ใครก็ไล่เดาชื่อผู้ใช้ที่มีในระบบได้
+ */
+export async function authenticate(
+  username: string,
+  password: string
+): Promise<TeacherAccount | null> {
+  const account = await getAccountByUsername(username);
+  if (!account) return null;
+  return verifyPassword(password, account.passwordHash) ? account : null;
+}
+
+// ---------------- เซสชัน ----------------
+
+export async function createAuthSession(accountId: string): Promise<string> {
+  const db = await getDb();
+  const now = Date.now();
+  const token = randomBytesCompat();
+  db.data.authSessions = db.data.authSessions.filter(
+    (s) => Date.parse(s.expiresAt) > now
+  );
+  db.data.authSessions.push({
+    id: token,
+    token,
+    accountId,
+    createdAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + SESSION_TTL_MS).toISOString(),
+  });
+  await db.write();
+  return token;
+}
+
+/**
+ * หาบัญชีจากโทเคน — คืน null ถ้าไม่มีหรือหมดอายุ
+ *
+ * เก็บโทเคนไว้ฝั่งเซิร์ฟเวอร์ (ไม่ใช่คุกกี้แบบเซ็นอย่างเดียว) เพราะต้อง "ออกจากระบบทุกเครื่อง"
+ * ได้จริง — ถ้าใช้คุกกี้เซ็นอย่างเดียว ใครขโมยคุกกี้ไปก็ยังใช้ได้ต่อจนหมดอายุ
+ */
+export async function getAccountByToken(token: string | undefined): Promise<TeacherAccount | null> {
+  if (!token) return null;
+  const db = await getDb();
+  const session = db.data.authSessions.find((s) => s.token === token);
+  if (!session) return null;
+  if (Date.parse(session.expiresAt) <= Date.now()) {
+    db.data.authSessions = db.data.authSessions.filter((s) => s.token !== token);
+    await db.write();
+    return null;
+  }
+  const account = db.data.teachers.find((t: any) => t.id === session.accountId);
+  return isUsableAccount(account) ? account : null;
+}
+
+export async function deleteAuthSession(token: string | undefined): Promise<void> {
+  if (!token) return;
+  const db = await getDb();
+  const before = db.data.authSessions.length;
+  db.data.authSessions = db.data.authSessions.filter((s) => s.token !== token);
+  if (db.data.authSessions.length !== before) await db.write();
+}
+
+export async function updateAccountProfile(
+  accountId: string,
+  updates: { name?: string; avatar?: string }
+): Promise<TeacherAccount | null> {
+  const db = await getDb();
+  const i = db.data.teachers.findIndex((t: any) => t.id === accountId);
+  if (i === -1) return null;
+  const current = db.data.teachers[i];
+  db.data.teachers[i] = {
+    ...current,
+    name: updates.name != null ? String(updates.name).trim() : current.name,
+    avatar: updates.avatar || current.avatar,
+  };
+  await db.write();
+  return db.data.teachers[i];
+}
+
+/**
+ * เปลี่ยนรหัสผ่าน
+ *
+ * บังคับให้ยืนยันรหัสเดิมก่อน ไม่งั้นถ้าโทเคนหลุด (เช่นคนอื่นเปิดหน้าเว็บบนเครื่องครูค้างไว้)
+ * ก็จะเปลี่ยนรหัสได้ทันทีโดยครูไม่รู้ตัว
+ */
+export async function updateAccountPassword(
+  accountId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ ok: boolean; error?: string }> {
+  const db = await getDb();
+  const account = db.data.teachers.find((t: any) => t.id === accountId);
+  if (!isUsableAccount(account)) return { ok: false, error: 'ไม่พบบัญชี' };
+  if (!verifyPassword(currentPassword, account.passwordHash)) {
+    return { ok: false, error: 'รหัสผ่านปัจจุบันไม่ถูกต้อง' };
+  }
+  account.passwordHash = hashPassword(newPassword);
+  await db.write();
+  return { ok: true };
+}
+
+/** โทเคนสุ่มแบบ hex — ไม่ใช้ค่าที่คาดเดาได้ */
+function randomBytesCompat(): string {
+  // ใช้ uuid ที่มีอยู่แล้ว แล้วเติมความยาวด้วยอีกชุด
+  return `${uuidv4().replace(/-/g, '')}${uuidv4().replace(/-/g, '')}`;
 }
 
 export const getSettings = async () => (await getDb()).data.settings;

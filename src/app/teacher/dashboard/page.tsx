@@ -60,12 +60,15 @@ export default function TeacherDashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (!isTeacherLoggedIn()) {
-      router.replace('/teacher/login');
-      return;
-    }
-    setTeacherName(getTeacherSession()?.name || '');
-    loadGames();
+    // ถามเซิร์ฟเวอร์ว่าล็อกอินอยู่หรือยัง (คุกกี้ HttpOnly อ่านจาก JS ไม่ได้)
+    getTeacherSession().then((session) => {
+      if (!session) {
+        router.replace('/teacher/login');
+        return;
+      }
+      setTeacherName(session.name || '');
+      loadGames();
+    });
   }, [router, loadGames]);
 
   const totalPlayers = games.reduce((sum, g) => sum + (g.players || 0), 0);

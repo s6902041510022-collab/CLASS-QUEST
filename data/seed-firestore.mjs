@@ -126,7 +126,7 @@ async function uploadToFirestore() {
     if (!Array.isArray(dbData[key])) dbData[key] = [];
   }
   if (!dbData.settings) {
-    dbData.settings = { teacherPin: '1234', teacherName: '' };
+    dbData.settings = { teacherName: '' };
   }
 
   // เพิ่มเกมตัวอย่างถ้ายังไม่มี
@@ -141,7 +141,9 @@ async function uploadToFirestore() {
   console.log(`   จำนวนเกม: ${dbData.games.length} เกม`);
   console.log(`   จำนวนด่าน (missions): ${dbData.missions.length} ด่าน`);
   console.log(`   จำนวนนักเรียน: ${dbData.students.length} คน`);
-  console.log(`   รหัส PIN ครู: ${dbData.settings.teacherPin || '1234'}`);
+  // ไม่พิมพ์รหัสผ่านออกมา — เดิมพิมพ์ PIN ลง console log
+  // ซึ่งติดอยู่ใน log ของเซิร์ฟเวอร์/ผู้ใช้ที่รันคำสั่งนี้ ไม่ใช่ที่ควรมีรหัสผ่านของครู
+  console.log(`   (ครูต้องสมัครบัญชีเองที่หน้า /teacher/login)`);
   if (a.addedGames || b.addedGame) {
     console.log(`   (เพิ่มเกมตัวอย่างใหม่: +${a.addedGames + b.addedGame} เกม)`);
   }

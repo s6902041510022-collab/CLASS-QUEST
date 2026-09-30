@@ -43,4 +43,7 @@ next-env.d.ts
 *.db-wal
 *.db-shm
 data/db.json
+# สำเนานี้คือ data/db.json ตอนกำลังรัน E2E — ถ้าเจอไฟล์นี้ แปลว่ารอบก่อนตายกลางคัน
+# scripts/e2e.mjs จะกู้ให้เองตอนรันครั้งถัดไป
+data/db.json.e2e-backup
 serviceAccountKey*.json

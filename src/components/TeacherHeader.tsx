@@ -18,11 +18,11 @@ export default function TeacherHeader({ title, subtitle, backHref }: Props) {
   const [teacher, setTeacher] = useState<{ name: string; avatar: string } | null>(null);
 
   useEffect(() => {
-    setTeacher(getTeacherSession());
+    getTeacherSession().then(setTeacher);
   }, []);
 
-  const handleLogout = () => {
-    clearTeacherSession();
+  const handleLogout = async () => {
+    await clearTeacherSession();
     router.push('/teacher/login');
   };
 

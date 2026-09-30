@@ -1,45 +1,63 @@
+// ห้องเรียน (โฟลเดอร์) — เฉพาะของครูที่ล็อกอิน
+//
+// ห้องเรียนชื่อซ้ำกันได้คนละครู เพราะ addGroup เช็คซ้ำเฉพาะในของครูคนเดียวกัน
+
 import { NextResponse } from 'next/server';
 import { getGroups, addGroup, deleteGroup } from '@/lib/db';
+import { requireAccount, notFound } from '@/lib/auth-server';
 import { errorMessage } from '@/lib/api-error';
 
-// GET รายการห้องเรียน (โฟลเดอร์) + จำนวนนักเรียนในแต่ละห้อง
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
-    const groups = await getGroups();
-    return NextResponse.json({ success: true, data: groups });
+    const auth = await requireAccount();
+    if (auth instanceof NextResponse) return auth;
+    return NextResponse.json({ success: true, data: await getGroups(auth.ownerId) });
   } catch (err) {
-    return NextResponse.json({ success: false, error: errorMessage(err, 'โหลดห้องเรียนไม่สำเร็จ') }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: errorMessage(err, 'โหลดห้องเรียนไม่สำเร็จ') },
+      { status: 500 }
+    );
   }
 }
 
-// POST สร้างห้องเรียนใหม่ — ครูพิมพ์ชื่อเอง
 export async function POST(request: Request) {
   try {
+    const auth = await requireAccount();
+    if (auth instanceof NextResponse) return auth;
+
     const body = await request.json();
     const name = String(body.name || '').trim();
     if (!name) {
       return NextResponse.json({ success: false, error: 'ใส่ชื่อห้องเรียน' }, { status: 400 });
     }
-    const group = await addGroup(name);
+    const group = await addGroup(name, auth.ownerId);
     return NextResponse.json({ success: true, data: group });
   } catch (err) {
-    return NextResponse.json({ success: false, error: errorMessage(err, 'สร้างห้องเรียนไม่สำเร็จ') }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: errorMessage(err, 'สร้างห้องเรียนไม่สำเร็จ') },
+      { status: 500 }
+    );
   }
 }
 
-// DELETE ลบห้องเรียน (นักเรียนในห้องจะกลับไป "ไม่มีห้อง")
 export async function DELETE(request: Request) {
   try {
+    const auth = await requireAccount();
+    if (auth instanceof NextResponse) return auth;
+
     const id = new URL(request.url).searchParams.get('id') || '';
     if (!id) {
       return NextResponse.json({ success: false, error: 'ไม่พบห้องเรียน' }, { status: 400 });
     }
-    const ok = await deleteGroup(id);
-    if (!ok) {
-      return NextResponse.json({ success: false, error: 'ไม่พบห้องเรียน' }, { status: 404 });
-    }
+    const ok = await deleteGroup(id, auth.ownerId);
+    if (!ok) return notFound();
     return NextResponse.json({ success: true });
   } catch (err) {
-    return NextResponse.json({ success: false, error: errorMessage(err, 'ลบห้องเรียนไม่สำเร็จ') }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: errorMessage(err, 'ลบห้องเรียนไม่สำเร็จ') },
+      { status: 500 }
+    );
   }
 }

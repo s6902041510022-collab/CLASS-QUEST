@@ -34,11 +34,13 @@ export default function TeacherStudentsPage() {
   const [bulkTarget, setBulkTarget] = useState('');
 
   useEffect(() => {
-    if (!getTeacherSession()) {
-      router.replace('/teacher/login');
-      return;
-    }
-    load();
+    getTeacherSession().then((session) => {
+      if (!session) {
+        router.replace('/teacher/login');
+        return;
+      }
+      load();
+    });
   }, [router]);
 
   const load = async () => {

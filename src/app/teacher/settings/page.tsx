@@ -4,31 +4,34 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { MASCOT } from '@/lib/utils';
-import { getTeacherSession, setTeacherSession, clearTeacherSession } from '@/lib/auth';
+import { getTeacherSession, clearTeacherSession, forgetTeacherSession } from '@/lib/auth';
 
 const AVATARS = ['👨‍🏫', '👩‍🏫', '🧑‍🏫', '🦊', '🐼', '🐨', '🦉', '🐧', '🌟', '🍀', '🎓', '✨'];
 
 export default function TeacherSettingsPage() {
   const router = useRouter();
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [avatar, setAvatar] = useState('👨‍🏫');
-  const [currentPin, setCurrentPin] = useState('');
-  const [newPin, setNewPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [pinError, setPinError] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const [saved, setSaved] = useState(false);
-  const [pinSaved, setPinSaved] = useState(false);
+  const [passwordSaved, setPasswordSaved] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const session = getTeacherSession();
-    if (!session) {
-      router.replace('/teacher/login');
-      return;
-    }
-    setName(session.name);
-    setAvatar(session.avatar || '👨‍🏫');
+    getTeacherSession().then((session) => {
+      if (!session) {
+        router.replace('/teacher/login');
+        return;
+      }
+      setName(session.name);
+      setUsername(session.username || '');
+      setAvatar(session.avatar || '👨‍🏫');
+    });
   }, [router]);
 
   const saveProfile = async (e: React.FormEvent) => {
@@ -48,7 +51,8 @@ export default function TeacherSettingsPage() {
       });
       const result = await response.json();
       if (result.success) {
-        setTeacherSession(name.trim(), avatar);
+        // รีเฟรชแคชฝั่ง client ให้เห็นชื่อใหม่ทันที
+        await getTeacherSession(true);
         setSaved(true);
         setTimeout(() => setSaved(false), 2500);
       } else {
@@ -61,50 +65,43 @@ export default function TeacherSettingsPage() {
     }
   };
 
-  const changePin = async (e: React.FormEvent) => {
+  const changePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    setPinError('');
-    setPinSaved(false);
+    setPasswordError('');
+    setPasswordSaved(false);
 
-    if (!currentPin) {
-      setPinError('กรอก PIN ปัจจุบัน');
-      return;
-    }
-    if (newPin.length < 4) {
-      setPinError('PIN ใหม่ต้องมีอย่างน้อย 4 หลัก');
-      return;
-    }
-    if (newPin !== confirmPin) {
-      setPinError('PIN ใหม่ทั้งสองช่องไม่ตรงกัน');
-      return;
+    if (!currentPassword) return setPasswordError('กรอกรหัสผ่านปัจจุบัน');
+    if (newPassword.length < 6) return setPasswordError('รหัสผ่านใหม่ต้องยาวอย่างน้อย 6 ตัว');
+    if (newPassword !== confirmPassword) {
+      return setPasswordError('รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน');
     }
 
     setLoading(true);
     try {
-      const response = await fetch('/api/auth', {
-        method: 'PATCH',
+      const response = await fetch('/api/auth/password', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPin, newPin }),
+        body: JSON.stringify({ currentPassword, newPassword }),
       });
       const result = await response.json();
       if (result.success) {
-        setCurrentPin('');
-        setNewPin('');
-        setConfirmPin('');
-        setPinSaved(true);
-        setTimeout(() => setPinSaved(false), 2500);
+        // เซิร์ฟเวอร์ตัดเซสชันทุกเครื่องทิ้งแล้ว รวมถึงเครื่องนี้
+        // ต้องลืนแคชฝั่ง client ด้วย ไม่งั้นหน้าล็อกอินจะเชื่อว่ายังล็อกอินอยู่
+        // แล้วดันกลับไป dashboard ที่โหลดข้อมูลไม่ได้ (เจอตอนลองด้วยมือจริง)
+        forgetTeacherSession();
+        router.push('/teacher/login');
       } else {
-        setPinError(result.error || 'เปลี่ยน PIN ไม่สำเร็จ');
+        setPasswordError(result.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ');
       }
     } catch {
-      setPinError('เปลี่ยน PIN ไม่สำเร็จ ลองใหม่อีกครั้ง');
+      setPasswordError('เปลี่ยนรหัสผ่านไม่สำเร็จ ลองใหม่อีกครั้ง');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    clearTeacherSession();
+  const handleLogout = async () => {
+    await clearTeacherSession();
     router.push('/teacher/login');
   };
 
@@ -160,6 +157,13 @@ export default function TeacherSettingsPage() {
                 {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
               </div>
 
+              <div>
+                <label className="block text-sm font-medium mb-2">ชื่อผู้ใช้ (เข้าสู่ระบบ)</label>
+                <input type="text" value={username} readOnly className="input bg-gray-50" />
+                <p className="text-xs text-quest-text/50 mt-1">
+                  เปลี่ยนไม่ได้ เพื่อไม่ให้สับสนตอนเข้าสู่ระบบ
+                </p>
+              </div>
               <div className="flex gap-3">
                 <button
                   type="submit"
@@ -173,72 +177,60 @@ export default function TeacherSettingsPage() {
           </div>
         </form>
 
-        {/* PIN */}
-        <form onSubmit={changePin} className="card p-6">
-          <h2 className="text-lg font-bold mb-1">เปลี่ยน PIN</h2>
-          {/* เคยเขียนบอกค่า PIN ปัจจุบันไว้ตรงนี้
-              แต่หน้านี้เปิดได้จากเบราว์เซอร์ ไม่ต้องล็อกอิน จึงเป็นการเปิดเผยรหัสผ่านให้คนอื่น
-              ถ้าครูเปลี่ยน PIN แล้วค่าที่เขียนไว้ก็ยังเป็นค่าเก่า ทำให้เข้าใจผิดว่าเปลี่ยนไม่ได้ */}
+        {/* รหัสผ่าน */}
+        <form onSubmit={changePassword} className="card p-6">
+          <h2 className="text-lg font-bold mb-1">เปลี่ยนรหัสผ่าน</h2>
           <p className="text-sm text-quest-text/60 mb-5">
-            PIN ใช้เข้าสู่ระบบฝั่งครู ถ้าลืม ต้องตั้งใหม่ผ่านหน้าสถานะระบบ
+            เปลี่ยนแล้วจะออกจากระบบทุกเครื่องทันที — กรุณาจำรหัสใหม่ไว้ด้วย เพราะถ้าลืมต้องสมัครบัญชีใหม่
           </p>
 
           <div className="grid sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-2">PIN ปัจจุบัน</label>
+              <label className="block text-sm font-medium mb-2">รหัสผ่านปัจจุบัน</label>
               <input
                 type="password"
-                inputMode="numeric"
-                maxLength={6}
-                value={currentPin}
+                value={currentPassword}
                 onChange={(e) => {
-                  setCurrentPin(e.target.value.replace(/\D/g, ''));
-                  setPinError('');
-                  setPinSaved(false);
+                  setCurrentPassword(e.target.value);
+                  setPasswordError('');
                 }}
                 className="input text-center"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">PIN ใหม่</label>
+              <label className="block text-sm font-medium mb-2">รหัสผ่านใหม่</label>
               <input
                 type="password"
-                inputMode="numeric"
-                maxLength={6}
-                value={newPin}
+                value={newPassword}
                 onChange={(e) => {
-                  setNewPin(e.target.value.replace(/\D/g, ''));
-                  setPinError('');
-                  setPinSaved(false);
+                  setNewPassword(e.target.value);
+                  setPasswordError('');
                 }}
                 className="input text-center"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">ยืนยัน PIN ใหม่</label>
+              <label className="block text-sm font-medium mb-2">ยืนยันรหัสผ่านใหม่</label>
               <input
                 type="password"
-                inputMode="numeric"
-                maxLength={6}
-                value={confirmPin}
+                value={confirmPassword}
                 onChange={(e) => {
-                  setConfirmPin(e.target.value.replace(/\D/g, ''));
-                  setPinError('');
-                  setPinSaved(false);
+                  setConfirmPassword(e.target.value);
+                  setPasswordError('');
                 }}
                 className="input text-center"
               />
             </div>
           </div>
 
-          {pinError && <p className="text-red-500 text-sm mt-3">{pinError}</p>}
+          {passwordError && <p className="text-red-500 text-sm mt-3">{passwordError}</p>}
 
           <button
             type="submit"
-            disabled={loading || !newPin || !confirmPin}
+            disabled={loading || !newPassword || !confirmPassword}
             className="btn-primary mt-4 disabled:opacity-50"
           >
-            {pinSaved ? 'เปลี่ยน PIN แล้ว ✓' : 'เปลี่ยน PIN'}
+            {loading ? 'กำลังเปลี่ยน...' : 'เปลี่ยนรหัสผ่าน'}
           </button>
         </form>
 

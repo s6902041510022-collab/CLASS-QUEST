@@ -139,5 +139,5 @@
   "sessions": [],
   "teams": [],
   "teachers": [],
-  "settings": { "teacherPin": "1234", "teacherName": "" }
+  "settings": { "teacherName": "" }
 }

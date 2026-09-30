@@ -1,9 +1,16 @@
+// เลื่อนนักเรียนไปข้อถัดไป (ตอบผิดกด "ไปข้อถัดไป" หรือหมดเวลา)
+// ตอบถูกจะเลื่อนให้อัตโนมัติใน /api/answers แล้ว
+//
+// ⚠️ เดิมรับ playerId จากที่ลูกค้าส่งมา — ใครก็เลื่อนข้อแทนเพื่อนได้
+//    (ถ้ายังไม่เข้าห้อง เลื่อนไปท้ายสุด = ข้ามคำถามฟรี)
+
 import { NextResponse } from 'next/server';
 import { getDb, advancePlayerPosition } from '@/lib/db';
+import { currentPlayer, notFound } from '@/lib/auth-server';
 import { errorMessage } from '@/lib/api-error';
 
-// POST /api/players/advance → เลื่อนนักเรียนไปข้อถัดไป (ใช้ตอนตอบผิดกด "ไปข้อถัดไป" หรือหมดเวลา)
-// ตอบถูกจะเลื่อนให้อัตโนมัติใน /api/answers แล้ว
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: Request) {
   try {
     const { playerId } = await request.json();
@@ -11,11 +18,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'ข้อมูลไม่ครบ' }, { status: 400 });
     }
 
+    // ต้องเป็นผู้เล่นที่ยิงคำขอนี้จริง ไม่ใช่แค่บอก id มา
+    const me = await currentPlayer();
+    if (!me || me.id !== playerId) {
+      return NextResponse.json(
+        { success: false, error: 'ยังไม่ได้เข้าห้อง — กรุณากรอกชื่อเข้าเกมใหม่' },
+        { status: 401 }
+      );
+    }
+
     const db = await getDb();
     const player = db.data.players.find((p: any) => p.id === playerId);
-    if (!player) {
-      return NextResponse.json({ success: false, error: 'ไม่พบผู้เล่น' }, { status: 404 });
-    }
+    if (!player) return notFound();
 
     advancePlayerPosition(db, player);
     await db.write();
@@ -31,6 +45,9 @@ export async function POST(request: Request) {
       },
     });
   } catch (err) {
-    return NextResponse.json({ success: false, error: errorMessage(err, 'เลื่อนข้อไม่สำเร็จ') }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: errorMessage(err, 'เลื่อนข้อไม่สำเร็จ') },
+      { status: 500 }
+    );
   }
 }

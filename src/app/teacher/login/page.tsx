@@ -3,81 +3,78 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { setTeacherSession, getTeacherSession } from '@/lib/auth';
+import { getTeacherSession } from '@/lib/auth';
 
 const AVATARS = ['👨‍🏫', '👩‍🏫', '🧑‍🏫', '🦊', '🐼', '🐨', '🦉', '🐧', '🌟', '🍀', '🎓', '✨'];
 
+type Mode = 'login' | 'register';
+
 export default function TeacherLoginPage() {
-  const [pin, setPin] = useState('');
+  const [mode, setMode] = useState<Mode>('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState('👨‍🏫');
-  const [step, setStep] = useState<'pin' | 'name'>('pin');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   // ถ้าเข้าสู่ระบบไว้แล้ว → ไปหน้า dashboard เลย
   useEffect(() => {
-    const session = getTeacherSession();
-    if (session) router.replace('/teacher/dashboard');
+    getTeacherSession().then((session) => {
+      if (session) router.replace('/teacher/dashboard');
+    });
   }, [router]);
 
-  const handlePin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!pin) {
-      setError('กรอก PIN ก่อนครับ');
-      return;
-    }
-    setLoading(true);
+  const switchMode = (next: Mode) => {
+    setMode(next);
     setError('');
+    setNotice('');
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setNotice('');
+
+    if (!username.trim()) return setError('กรอกชื่อผู้ใช้ครับ');
+    if (!password) return setError('กรอกรหัสผ่านครับ');
+    if (mode === 'register' && !name.trim()) return setError('กรอกชื่อที่จะแสดงในเกมครับ');
+
+    setLoading(true);
     try {
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
-      });
+      const response = await fetch(
+        mode === 'login' ? '/api/auth/login' : '/api/auth/register',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            mode === 'login'
+              ? { username, password }
+              : { username, password, name: name.trim(), avatar }
+          ),
+        }
+      );
       const result = await response.json();
 
       if (!result.success) {
-        setError(result.error || 'รหัส PIN ไม่ถูกต้อง');
+        setError(result.error || 'ทำรายการไม่สำเร็จ');
         return;
       }
-      if (result.needsName) {
-        setStep('name');
-        return;
+
+      // คนแรกที่สมัครได้รับของเดิมในระบบไปด้วย (เกมที่ทำไว้ตอนใช้รหัสเดิม)
+      if (result.isFirstTeacher) {
+        setNotice('บัญชีแรกของระบบ — เกมและรายชื่อที่มีอยู่เดิมถูกย้ายมาให้คุณแล้ว');
       }
-      setTeacherSession(result.data.name, result.data.avatar);
+
+      // รีเฟรชแคชสถานะก่อน ไม่งั้นหน้าถัดไปจะเจอค่า "ไม่ได้ล็อกอิน" ที่หน้านี้แคชไว้ตอนเปิด
+      // แล้วดันเรากลับมาหน้าล็อกอินวนไม่จบ (เจอตอนลองด้วยมือจริง)
+      await getTeacherSession(true);
+
       router.push('/teacher/dashboard');
     } catch {
       setError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleName = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) {
-      setError('กรอกชื่อครูด้วยครับ');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const response = await fetch('/api/auth', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), avatar }),
-      });
-      const result = await response.json();
-      if (result.success) {
-        setTeacherSession(name.trim(), avatar);
-        router.push('/teacher/dashboard');
-      } else {
-        setError(result.error || 'บันทึกชื่อไม่สำเร็จ');
-      }
-    } catch {
-      setError('บันทึกชื่อไม่สำเร็จ ลองใหม่อีกครั้ง');
     } finally {
       setLoading(false);
     }
@@ -87,114 +84,123 @@ export default function TeacherLoginPage() {
     <div className="min-h-screen bg-gradient-to-br from-sky-50 via-lavender-50 to-mint-50 flex items-center justify-center p-4">
       <div className="card w-full max-w-md p-8">
         <div className="text-center mb-8">
-          <div className="text-6xl mb-4">{step === 'pin' ? '👨‍🏫' : avatar}</div>
+          <div className="text-6xl mb-4">👨‍🏫</div>
           <h1 className="text-2xl font-bold mb-2">
-            {step === 'pin' ? 'เข้าสู่ระบบครู' : 'ตั้งชื่อของคุณ'}
+            {mode === 'login' ? 'เข้าสู่ระบบครู' : 'สมัครบัญชีครู'}
           </h1>
           <p className="text-quest-text/60">
-            {step === 'pin' ? 'กรอก PIN เพื่อเข้าสู่ระบบ' : 'ชื่อนี้จะแสดงในเกมและหน้าสถิติ'}
+            {mode === 'login'
+              ? 'กรอกชื่อผู้ใช้และรหัสผ่านของคุณ'
+              : 'สร้างบัญชีของตัวเอง — เห็นเฉพาะเกมของตัวเอง'}
           </p>
         </div>
 
-        {step === 'pin' ? (
-          <form onSubmit={handlePin} className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium mb-2">PIN</label>
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={6}
-                value={pin}
-                onChange={(e) => {
-                  setPin(e.target.value.replace(/\D/g, ''));
-                  setError('');
-                }}
-                placeholder="กรอก PIN 4 หลัก"
-                className="input text-center text-2xl tracking-widest"
-                autoFocus
-              />
-              {error && <p className="text-red-500 text-sm mt-2 text-center">{error}</p>}
-            </div>
-
+        {/* สลับเข้า/สมัคร — ครูใหม่ไม่ต้องเดาเส้นทาง */}
+        <div className="flex gap-2 mb-6 bg-gray-100 rounded-2xl p-1">
+          {(['login', 'register'] as Mode[]).map((m) => (
             <button
-              type="submit"
-              disabled={loading || pin.length < 4}
-              className="btn-primary w-full disabled:opacity-50"
+              key={m}
+              type="button"
+              onClick={() => switchMode(m)}
+              className={`flex-1 py-2 rounded-xl font-medium transition-all ${
+                mode === m ? 'bg-white shadow-sm text-quest-sky' : 'text-quest-text/60'
+              }`}
             >
-              {loading ? 'กำลังตรวจสอบ...' : 'ถัดไป'}
+              {m === 'login' ? 'เข้าสู่ระบบ' : 'สมัครบัญชีใหม่'}
             </button>
-          </form>
-        ) : (
-          <form onSubmit={handleName} className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium mb-2">ชื่อครู</label>
-              <input
-                type="text"
-                maxLength={30}
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  setError('');
-                }}
-                placeholder="เช่น ครูสมชาย"
-                className="input"
-                autoFocus
-              />
-              {error && <p className="text-red-500 text-sm mt-2 text-center">{error}</p>}
-            </div>
+          ))}
+        </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-2">เลือกรูป</label>
-              <div className="grid grid-cols-6 gap-2">
-                {AVATARS.map((a) => (
-                  <button
-                    key={a}
-                    type="button"
-                    onClick={() => setAvatar(a)}
-                    className={`w-12 h-12 rounded-2xl text-2xl flex items-center justify-center transition-all ${
-                      avatar === a
-                        ? 'bg-quest-sky ring-2 ring-quest-sky scale-110'
-                        : 'bg-gray-100 hover:bg-gray-200'
-                    }`}
-                  >
-                    {a}
-                  </button>
-                ))}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">ชื่อผู้ใช้</label>
+            <input
+              type="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setError('');
+              }}
+              placeholder="ตัวอักษรอังกฤษ ตัวเลข และ _ . -"
+              className="input"
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">รหัสผ่าน</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError('');
+              }}
+              placeholder={mode === 'register' ? 'อย่างน้อย 6 ตัว' : 'รหัสผ่านของคุณ'}
+              className="input"
+            />
+          </div>
+
+          {mode === 'register' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium mb-2">ชื่อที่จะแสดงในเกม</label>
+                <input
+                  type="text"
+                  maxLength={30}
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setError('');
+                  }}
+                  placeholder="เช่น ครูสมชาย"
+                  className="input"
+                />
               </div>
-            </div>
 
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setStep('pin');
-                  setError('');
-                }}
-                className="btn-secondary flex-1"
-              >
-                ← ย้อนกลับ
-              </button>
-              <button
-                type="submit"
-                disabled={!name.trim() || loading}
-                className="btn-primary flex-1 disabled:opacity-50"
-              >
-                {loading ? 'กำลังบันทึก...' : 'เริ่มใช้งาน'}
-              </button>
-            </div>
-          </form>
-        )}
+              <div>
+                <label className="block text-sm font-medium mb-2">เลือกรูป</label>
+                <div className="grid grid-cols-6 gap-2">
+                  {AVATARS.map((a) => (
+                    <button
+                      key={a}
+                      type="button"
+                      onClick={() => setAvatar(a)}
+                      className={`w-12 h-12 rounded-2xl text-2xl flex items-center justify-center transition-all ${
+                        avatar === a
+                          ? 'bg-quest-sky ring-2 ring-quest-sky scale-110'
+                          : 'bg-gray-100 hover:bg-gray-200'
+                      }`}
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
 
-        {/* เคยแสดง PIN ตรงกลางหน้านี้ (ตอนที่ยังเป็นแค่เดโม)
-            แต่พอแชกให้นักเรียนแล้ว มันกลายเป็นการประกาศรหัสผ่านให้ทุกคนที่เปิดเว็บ
-            และแย่กว่านั้น พอครูเปลี่ยน PIN แล้ว หน้านี้ยังบอกค่าเก่าอยู่ ทำให้เข้าใจผิดว่าเปลี่ยนไม่ได้
-            เทสต์ scripts/no-pin-in-ui.test.mjs จับการกลับมาแบบนี้ได้
-            ถ้าลืม PIN ตอนนี้ไม่มีทางกู้ — ต้องไปที่ /setup ดูสถานะระบบ */}
-        {step === 'pin' && (
-          <p className="mt-6 text-sm text-quest-text/60 text-center">
-            PIN ตั้งไว้โดยครูเจ้าของระบบ
-          </p>
-        )}
+          {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+          {notice && <p className="text-emerald-600 text-sm text-center">{notice}</p>}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="btn-primary w-full disabled:opacity-50"
+          >
+            {loading
+              ? 'กำลังบันทึก...'
+              : mode === 'login'
+                ? 'เข้าสู่ระบบ'
+                : 'สมัครและเริ่มใช้งาน'}
+          </button>
+        </form>
+
+        <p className="mt-6 text-sm text-quest-text/60 text-center leading-relaxed">
+          สมัครได้เลยหลายคน — แต่ละบัญชีเห็นแค่เกมและรายชื่อนักเรียนของตัวเอง
+        </p>
 
         {/* ล็อกอินไม่ได้บ่อยครั้งเพราะระบบเขียนฐานข้อมูลไม่ได้
             (เช่น deploy บน Vercel ที่ filesystem เป็น read-only)

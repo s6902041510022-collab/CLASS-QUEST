@@ -13,7 +13,29 @@ import {
 } from '@/lib/db';
 import { BOSS_DAMAGE_PER_CORRECT, BONUS_MAX_XP } from '@/lib/utils';
 import { questionToTask, gradeTask } from '@/lib/mission-tasks';
+import { currentPlayer, notFound } from '@/lib/auth-server';
 import { errorMessage } from '@/lib/api-error';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * ยืนยันว่าคำขอนี้มาจาก "ผู้เล่นคนนี้จริง" ไม่ใช่การยิงแทนคนอื่น
+ *
+ * ⚠️ เดิมรับ playerId จากที่ลูกค้าส่งมาเฉย ๆ — ใครก็ใส่ playerId ของเพื่อน
+ *    แล้วตอบคำถามจนเพื่อนได้ XP ได้ (หรือกดเลื่อนข้อแทนได้)
+ *    ตอนนี้ผูกกับคุกกี้ cq_student ที่ตั้งตอนเข้าห้องแทน
+ */
+async function requireSelfPlayer(playerId: string, gameId: string) {
+  const me = await currentPlayer();
+  if (!me || me.id !== playerId) {
+    return NextResponse.json(
+      { success: false, error: 'ยังไม่ได้เข้าห้อง — กรุณากรอกชื่อเข้าเกมใหม่' },
+      { status: 401 }
+    );
+  }
+  if (me.gameId !== gameId) return notFound();
+  return me;
+}
 
 // POST บันทึกคำตอบ 1 ข้อ (เขียนข้อมูลทั้งหมดในรอบเดียว เพื่อกันเขียนซ้อนแล้วข้อมูลหาย)
 export async function POST(request: Request) {
@@ -23,10 +45,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'ข้อมูลไม่ครบ' }, { status: 400 });
     }
 
-    const playerCheck = await getPlayer(playerId);
-    if (!playerCheck) {
-      return NextResponse.json({ success: false, error: 'ไม่พบผู้เล่น' }, { status: 404 });
-    }
+    const playerCheck = await requireSelfPlayer(playerId, gameId);
+    if (playerCheck instanceof NextResponse) return playerCheck;
     if (!(await getGame(gameId))) {
       return NextResponse.json({ success: false, error: 'ไม่พบเกม' }, { status: 404 });
     }
@@ -35,6 +55,11 @@ export async function POST(request: Request) {
 
     const mission = db.data.missions.find((m: any) => m.id === missionId);
     if (!mission) {
+      return NextResponse.json({ success: false, error: 'ไม่พบ Mission' }, { status: 404 });
+    }
+    // 🔑 Mission ต้องอยู่ในเกมเดียวกันที่กำลังเล่น
+    // ไม่งั้นส่ง missionId ของเกมอื่นมา ก็เก็บ XP เข้าตัวเองได้ (เกมคนละครูด้วย)
+    if (mission.gameId !== gameId) {
       return NextResponse.json({ success: false, error: 'ไม่พบ Mission' }, { status: 404 });
     }
     const question = (mission.questions || []).find((q: any) => q.id === questionId);
@@ -195,6 +220,9 @@ export async function PUT(request: Request) {
     if (!gameId || !playerId) {
       return NextResponse.json({ success: false, error: 'ข้อมูลไม่ครบ' }, { status: 400 });
     }
+    const self = await requireSelfPlayer(playerId, gameId);
+    if (self instanceof NextResponse) return self;
+
     const player = await getPlayer(playerId);
     const session = await getSession(gameId);
     if (!player || !session) {

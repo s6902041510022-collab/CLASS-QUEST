@@ -1,29 +1,40 @@
 // ทดสอบชนิดคำถามใหม่ (กรอกตัวเลข / จับคู่) แบบ end-to-end ผ่าน API จริง
 // รัน: node --test scripts/e2e-tasks.test.mjs     (ต้องมี dev server รันอยู่ที่ port 3000)
+//
+// ⚠️ เทสต์นี้สมัครบัญชีครูชั่วคราวเอง (ชื่อสุ่ม) แล้วลบเกมที่สร้างทิ้ง
+//    ตัวบัญชีเองค้างไว้ เพราะไม่มี API ลบบัญชี — เป็นการตัดสินใจ ไม่ใช่ข้อผิดพลาด
+//    (ถ้ามีการลบบัญชี ใครก็ยิง endpoint นั้นลบบัญชีครูทั้งระบบได้ ถ้าไม่มีด่านตรวจ)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { makeClient, ok, uniqueName } from './http-client.mjs';
 
-const BASE = 'http://localhost:3000';
+const BASE = process.env.CQ_BASE || 'http://localhost:3000';
+
+// ⚠️ คนละ client: คุกกี้ครู (cq_session) กับคุกกี้นักเรียน (cq_student) ต้องไม่ปนกัน
+//    ถ้าใช้ตัวเดียว เทสต์นี้จะผ่านทั้งที่หน้าเว็บจริงไม่ได้เป็นแบบนั้น
+const teacher = makeClient(BASE);
+const student = makeClient(BASE);
+
 let gameId = '';
 let playerId = '';
 let studentId = '';
 let missionIds = []; // [0]=choice, [1]=numeric, [2]=match, [3]=boss
 
-const req = async (url, method, body) => {
-  const r = await fetch(BASE + url, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return { status: r.status, json: await r.json() };
-};
-const post = (url, body) => req(url, 'POST', body);
-const put = (url, body) => req(url, 'PUT', body);
-const del = async (url) => fetch(BASE + url, { method: 'DELETE' });
-const ok = (res, what) =>
-  assert.ok(res.status === 200 || res.status === 201, what + ': ' + JSON.stringify(res.json));
+// ครูทำงานผ่าน teacher client เสมอ
+const post = (url, body) => teacher.post(url, body);
+const put = (url, body) => teacher.put(url, body);
+const del = (url) => teacher.del(url);
 
 before(async () => {
+  const reg = await teacher.post('/api/auth/register', {
+    username: uniqueName('cq_tasks_'),
+    password: 'test-password-123',
+    name: 'ครูทดสอบ E2E',
+  });
+  ok(reg, 'สมัครบัญชีครูไม่สำเร็จ');
+  assert.ok(teacher.jar.get('cq_session'), 'ต้องได้คุกกี้เซสชันหลังสมัคร');
+  assert.equal(reg.json.data?.passwordHash, undefined, 'ต้องไม่ตอบ hash รหัสผ่านกลับมา');
+
   const g = await post('/api/games', {
     name: 'E2E tasks test',
     subject: 'ทดสอบ',
@@ -95,9 +106,11 @@ before(async () => {
   ok(st, 'สร้างนักเรียนทดสอบไม่สำเร็จ');
   studentId = st.json.data.id;
 
-  const p = await post('/api/players', { gameId, studentId });
-  ok(p, 'สร้าง player ไม่สำเร็จ');
+  // เข้าห้องด้วย client ของนักเรียน — เพราะต้องได้คุกกี้ cq_student ไปใช้ตอบข้อ
+  const p = await student.post('/api/players', { gameId, studentId });
+  ok(p, 'เข้าห้องไม่สำเร็จ');
   playerId = p.json.data.id;
+  assert.ok(student.jar.get('cq_student'), 'ต้องได้คุกกี้ผู้เล่นหลังเข้าห้อง');
 });
 
 after(async () => {
@@ -107,9 +120,42 @@ after(async () => {
   if (studentId) await del('/api/students/' + studentId);
 });
 
-const getPlayer = () => fetch(`${BASE}/api/players?id=${playerId}`).then((x) => x.json());
+// ---------- ผู้มีสิทธิ์ต้องถูกต้องก่อนทุกอย่าง ----------
+
+test('ไม่ล็อกอินแล้วสร้างเกมไม่ได้ (เดิมใครก็สร้างได้)', async () => {
+  const anon = makeClient(BASE);
+  const r = await anon.post('/api/games', { name: 'เกมของคนไม่ล็อกอิน' });
+  assert.equal(r.status, 401, 'ต้องตอบ 401 ไม่ใช่ 403');
+  assert.equal(r.json.success, false);
+});
+
+test('ไม่ล็อกอินแล้วอ่านสถิติไม่ได้ (เดิมดูสถิติครูทุกคนได้)', async () => {
+  const anon = makeClient(BASE);
+  const r = await anon.get(`/api/analytics?gameId=${gameId}`);
+  assert.equal(r.status, 401, 'สถิติเกมต้องการครูเจ้าของเกม');
+});
+
+// ---------- ตอบคำถาม: ผูกกับคุกกี้ผู้เล่น ----------
+
+// ⚠️ ต้องใช้ client ของนักเรียน — route ผูกกับคุกกี้ cq_student ไม่ใช่ค่าที่ส่งมา
+//    (เดิมรับ playerId จากผู้เรียก ทำให้ใครก็ตอบแทนเพื่อนได้)
+const getPlayer = () => teacher.get(`/api/players?id=${playerId}`).then((x) => x.json);
 const answer = (missionIdx, questionId, selectedAnswer) =>
-  post('/api/answers', { playerId, gameId, missionId: missionIds[missionIdx], questionId, selectedAnswer, timeTakenSec: 5 });
+  student.post('/api/answers', {
+    playerId, gameId, missionId: missionIds[missionIdx], questionId, selectedAnswer, timeTakenSec: 5,
+  });
+const advance = () => student.post('/api/players/advance', { playerId });
+
+test('คนยิงแทนไม่ได้: ตอบข้อแทนผู้เล่นคนอื่นไม่ได้', async () => {
+  const anon = makeClient(BASE);
+  const r = await anon.post('/api/answers', {
+    playerId, gameId, missionId: missionIds[0], questionId: 't-c1', selectedAnswer: 0,
+  });
+  assert.equal(r.status, 401, 'ไม่มีคุกกี้ผู้เล่น = ตอบไม่ได้');
+
+  const back = await getPlayer();
+  assert.equal(back.data.answers.length, 0, '⚠️ มีคำตอบถูกบันทึกทั้งที่ยิงไม่ผ่านด่าน');
+});
 
 // ---------- choice ยังทำงานเหมือนเดิม และเดินต่อได้ ----------
 
@@ -146,7 +192,7 @@ test('numeric: ตอบผิด -> ไม่เดินหน้า และ
 // ---------- match ----------
 
 test('match: ข้ามข้อผิดด้วยปุ่ม "ไปข้อถัดไป" แล้วจับคู่ถูก = ผ่านด่าน', async () => {
-  const adv = await post('/api/players/advance', { playerId });
+  const adv = await advance();
   ok(adv, 'เลื่อนข้อ');
   assert.equal(adv.json.data.posMission, 2, 'ต้องเข้าด่านจับคู่');
   assert.equal(adv.json.data.quizDone, false);
@@ -156,6 +202,32 @@ test('match: ข้ามข้อผิดด้วยปุ่ม "ไปข�
   assert.equal(r.json.data.correct, true, 'จับคู่ถูกต้องทุกคู่');
   assert.equal(r.json.data.kind, 'match');
   assert.equal(r.json.data.quizDone, true, 'ตอบครบทุกด่านควิซแล้ว');
+});
+
+// ---------- ด่านของเกมอื่นฟาร์มคะแนนไม่ได้ ----------
+
+test('ส่ง mission ของเกมอื่นมาเก็บ XP ไม่ได้', async () => {
+  const other = await teacher.post('/api/games', { name: 'เกมที่สองของครูคนเดียวกัน' });
+  ok(other, 'สร้างเกมที่สอง');
+  const otherMission = await teacher.post('/api/missions', {
+    gameId: other.json.data.id, type: 'quiz', title: 'ด่านของเกมอื่น', xp: 9999,
+    questions: [{ id: 't-x1', text: 'ข้อนี้ไม่ควรถูกตอบ', options: ['a', 'b'], correctAnswer: 0 }],
+  });
+  ok(otherMission, 'สร้างด่านของเกมอื่น');
+
+  const before = (await getPlayer()).data;
+  const r = await student.post('/api/answers', {
+    playerId, gameId, missionId: otherMission.json.data.id, questionId: 't-x1', selectedAnswer: 0,
+  });
+  assert.equal(r.status, 404, 'ด่านของเกมอื่นต้องหายไป ไม่ใช่ "ตอบได้แต่ไม่นับ"');
+
+  const after = (await getPlayer()).data;
+  // เทียบกับจำนวนก่อนยิง ไม่ใช่ตัวเลขตายตัว — ไม่งั้นเพิ่มเทสต์ข้างหน้าแล้วตัวนี้จะพังเปล่า
+  assert.equal(after.totalXp, before.totalXp, '⚠️ ได้ XP จากด่านของเกมอื่น');
+  assert.equal(after.answers.length, before.answers.length, '⚠️ บันทึกคำตอบของด่านเกมอื่น');
+
+  await teacher.del('/api/missions/' + otherMission.json.data.id);
+  await teacher.del('/api/games/' + other.json.data.id);
 });
 
 // ---------- boss ที่มีทั้ง 3 ชนิด ----------
@@ -180,11 +252,12 @@ test('บอส: จับคู่ผิด = ไม่ตีบอส แล�
 });
 
 test('บอส: กดไปข้อถัดไป แล้วตอบ choice ถูก = บอสตาย', async () => {
-  const adv = await post('/api/players/advance', { playerId });
+  const adv = await advance();
   ok(adv, 'เลื่อนข้อบอส');
   assert.equal(adv.json.data.bossPos, 2, 'ข้ามข้อจับคู่ที่ตอบผิด');
 
   const r = await answer(3, 't-b3', 0);
+  ok(r, 'ตอบบอสข้อสุดท้าย');
   assert.equal(r.json.data.correct, true);
   assert.equal(r.json.data.bossHpLeft, 200, 'ตี 2 ครั้ง = 200 แต่ได้ ' + r.json.data.bossHpLeft);
   assert.equal(r.json.data.bossDone, true);
@@ -193,9 +266,9 @@ test('บอส: กดไปข้อถัดไป แล้วตอบ choi
 // ---------- analytics ต้องอ่านชนิดใหม่ได้ ----------
 
 test('analytics: คืน kind และสรุปคำตอบที่พบบ่อยของชนิดใหม่', async () => {
-  const r = await fetch(`${BASE}/api/analytics?gameId=${gameId}`).then((x) => x.json());
-  assert.equal(r.success, true);
-  const qs = r.data.questions || [];
+  const r = await teacher.get(`/api/analytics?gameId=${gameId}`);
+  assert.equal(r.json.success, true);
+  const qs = r.json.data.questions || [];
   const byId = new Map(qs.map((q) => [q.questionId, q]));
 
   const n1 = byId.get('t-n1');
@@ -212,7 +285,7 @@ test('analytics: คืน kind และสรุปคำตอบที่พ
 
   const c1 = byId.get('t-c1');
   assert.equal(c1.kind, 'choice');
-  assert.equal(c1.optionTally.length, 2, 'ชนิดตัวเลือกยังนับทีละ index เห���ือนเดิม');
+  assert.equal(c1.optionTally.length, 2, 'ชนิดตัวเลือกยังนับทีละ index เหมือนเดิม');
   assert.equal(c1.answerTally.length, 0);
 });
 
@@ -250,47 +323,47 @@ test('คำตอบที่บันทึก: เก็บ kind ถูกช
 
 test('แก้ไขด่านแล้วบันทึกได้จริง: คู่จับคู่/ตัวเลือก/หน่วย ต้องไม่หาย', async () => {
   // ด่านจับคู่ — แก้ค่าในคู่ แล้วอ่านกลับ
-  const cur = await fetch(`${BASE}/api/missions/${missionIds[2]}`).then((x) => x.json());
-  const pairs = cur.data.questions[0].pairs.map((p) => ({ a: p.a, b: p.b }));
+  const cur = await teacher.get(`/api/missions/${missionIds[2]}`);
+  const pairs = cur.json.data.questions[0].pairs.map((p) => ({ a: p.a, b: p.b }));
   pairs[0].b = 'แก้แล้ว-ฝั่งขวา';
   pairs.push({ a: 'คู่ใหม่', b: 'ของใหม่' });
 
   const up = await put(`/api/missions/${missionIds[2]}`, {
-    gameId, title: cur.data.title, type: cur.data.type,
-    xp: cur.data.xp, timeLimit: cur.data.timeLimit,
-    questions: [{ ...cur.data.questions[0], pairs }],
+    gameId, title: cur.json.data.title, type: cur.json.data.type,
+    xp: cur.json.data.xp, timeLimit: cur.json.data.timeLimit,
+    questions: [{ ...cur.json.data.questions[0], pairs }],
   });
   ok(up, 'บันทึกด่านจับคู่ไม่สำเร็จ');
 
-  const back = await fetch(`${BASE}/api/missions/${missionIds[2]}`).then((x) => x.json());
-  assert.equal(back.data.questions[0].pairs[0].b, 'แก้แล้ว-ฝั่งขวา', 'แก้คู่เดิมต้องอยู่');
-  assert.equal(back.data.questions[0].pairs.length, 4, 'เพิ่มคู่ใหม่ต้องอยู่ (ได้ ' + back.data.questions[0].pairs.length + ')');
-  assert.equal(back.data.questions[0].pairs[3].a, 'คู่ใหม่');
+  const back = await teacher.get(`/api/missions/${missionIds[2]}`);
+  assert.equal(back.json.data.questions[0].pairs[0].b, 'แก้แล้ว-ฝั่งขวา', 'แก้คู่เดิมต้องอยู่');
+  assert.equal(back.json.data.questions[0].pairs.length, 4, 'เพิ่มคู่ใหม่ต้องอยู่ (ได้ ' + back.json.data.questions[0].pairs.length + ')');
+  assert.equal(back.json.data.questions[0].pairs[3].a, 'คู่ใหม่');
 
   // ด่านตัวเลข — แก้คำตอบถูก + หน่วย
-  const nCur = await fetch(`${BASE}/api/missions/${missionIds[1]}`).then((x) => x.json());
+  const nCur = await teacher.get(`/api/missions/${missionIds[1]}`);
   const nUp = await put(`/api/missions/${missionIds[1]}`, {
-    gameId, title: nCur.data.title, type: nCur.data.type,
-    xp: nCur.data.xp, timeLimit: nCur.data.timeLimit,
-    questions: nCur.data.questions.map((q, i) =>
+    gameId, title: nCur.json.data.title, type: nCur.json.data.type,
+    xp: nCur.json.data.xp, timeLimit: nCur.json.data.timeLimit,
+    questions: nCur.json.data.questions.map((q, i) =>
       i === 0 ? { ...q, correctAnswer: '2048', unit: 'ไบต์ใหม่' } : q
     ),
   });
   ok(nUp, 'บันทึกด่านตัวเลขไม่สำเร็จ');
-  const nBack = await fetch(`${BASE}/api/missions/${missionIds[1]}`).then((x) => x.json());
-  assert.equal(nBack.data.questions[0].correctAnswer, '2048', 'แก้คำตอบถูกต้องต้องอยู่');
-  assert.equal(nBack.data.questions[0].unit, 'ไบต์ใหม่', 'แก้หน่วยต้องอยู่');
-  assert.equal(nBack.data.questions[1].correctAnswer, '8 | 8.0', 'ข้อที่ไม่ได้แก้ต้องไม่หาย');
+  const nBack = await teacher.get(`/api/missions/${missionIds[1]}`);
+  assert.equal(nBack.json.data.questions[0].correctAnswer, '2048', 'แก้คำตอบถูกต้องต้องอยู่');
+  assert.equal(nBack.json.data.questions[0].unit, 'ไบต์ใหม่', 'แก้หน่วยต้องอยู่');
+  assert.equal(nBack.json.data.questions[1].correctAnswer, '8 | 8.0', 'ข้อที่ไม่ได้แก้ต้องไม่หาย');
 
   // ด่านตัวเลือก — แก้ตัวเลือก + เฉลย
-  const cCur = await fetch(`${BASE}/api/missions/${missionIds[0]}`).then((x) => x.json());
+  const cCur = await teacher.get(`/api/missions/${missionIds[0]}`);
   const cUp = await put(`/api/missions/${missionIds[0]}`, {
-    gameId, title: cCur.data.title, type: cCur.data.type,
-    xp: cCur.data.xp, timeLimit: cCur.data.timeLimit,
-    questions: [{ ...cCur.data.questions[0], options: ['แก้1', 'แก้2', 'แก้3'], correctAnswer: 2 }],
+    gameId, title: cCur.json.data.title, type: cCur.json.data.type,
+    xp: cCur.json.data.xp, timeLimit: cCur.json.data.timeLimit,
+    questions: [{ ...cCur.json.data.questions[0], options: ['แก้1', 'แก้2', 'แก้3'], correctAnswer: 2 }],
   });
   ok(cUp, 'บันทึกด่านตัวเลือกไม่สำเร็จ');
-  const cBack = await fetch(`${BASE}/api/missions/${missionIds[0]}`).then((x) => x.json());
-  assert.deepEqual(cBack.data.questions[0].options, ['แก้1', 'แก้2', 'แก้3']);
-  assert.equal(cBack.data.questions[0].correctAnswer, 2);
+  const cBack = await teacher.get(`/api/missions/${missionIds[0]}`);
+  assert.deepEqual(cBack.json.data.questions[0].options, ['แก้1', 'แก้2', 'แก้3']);
+  assert.equal(cBack.json.data.questions[0].correctAnswer, 2);
 });

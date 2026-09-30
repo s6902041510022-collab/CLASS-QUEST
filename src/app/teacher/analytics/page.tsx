@@ -17,25 +17,32 @@ function Analytics() {
   const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
-    if (!getTeacherSession()) {
-      router.replace('/teacher/login');
-      return;
-    }
     // เปลี่ยนเกม → เคลียร์ข้อมูลเก่า (ภาพรวมกับรายเกมมีโครงสร้างต่างกัน
     // ถ้าใช้ของเดิมค้างอยู่ GameAnalytics จะอ่าน totals ไม่เจอแล้ว crash)
     let cancelled = false;
-    setData(null);
-    setLoadError('');
-    fetch(`/api/analytics${gameId ? `?gameId=${gameId}` : ''}`)
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return;
-        if (j.success) setData(j.data);
-        else setLoadError(j.error || 'โหลดข้อมูลไม่สำเร็จ');
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError('โหลดข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง');
-      });
+
+    // คุกกี้เซสชันเป็น HttpOnly อ่านจาก JS ไม่ได้ จึงต้องถามเซิร์ฟเวอร์
+    // ทำก่อนโหลดข้อมูล ไม่งั้นจะยิง API ที่คืน 401 แล้วหน้ากะพริบว่า "โหลดไม่สำเร็จ"
+    getTeacherSession().then((session) => {
+      if (cancelled) return;
+      if (!session) {
+        router.replace('/teacher/login');
+        return;
+      }
+      setData(null);
+      setLoadError('');
+      fetch(`/api/analytics${gameId ? `?gameId=${gameId}` : ''}`)
+        .then((r) => r.json())
+        .then((j) => {
+          if (cancelled) return;
+          if (j.success) setData(j.data);
+          else setLoadError(j.error || 'โหลดข้อมูลไม่สำเร็จ');
+        })
+        .catch(() => {
+          if (!cancelled) setLoadError('โหลดข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง');
+        });
+    });
+
     return () => {
       cancelled = true;
     };

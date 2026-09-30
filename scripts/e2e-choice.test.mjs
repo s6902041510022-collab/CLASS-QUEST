@@ -3,30 +3,35 @@
 // ใช้เกมที่สร้างขึ้นมาเฉพาะการทดสอบ แล้วลบทิ้ง — ไม่แตะข้อมูลเกมจริง
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { makeClient, ok, uniqueName } from './http-client.mjs';
 
-const BASE = 'http://localhost:3000';
+const BASE = process.env.CQ_BASE || 'http://localhost:3000';
+
+// ⚠️ คนละ client: คุกกี้ครูกับคุกกี้นักเรียนต้องแยกกัน
+//    (ถ้าใช้ตัวเดียว เทสต์นี้จะผ่านทั้งที่หน้าเว็บจริงไม่ได้เป็นแบบนั้น)
+const teacher = makeClient(BASE);
+const student = makeClient(BASE);
+
 let gameId = '';
 let playerId = '';
 let studentId = '';
 let missionIds = []; // ตามลำดับ: [0]=ด่าน1, [1]=ด่านว่าง, [2]=ด่าน2, [3]=บอส
 
-const req = async (url, method, body) => {
-  const r = await fetch(BASE + url, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return { status: r.status, json: await r.json() };
-};
-const post = (url, body) => req(url, 'POST', body);
-const put = (url, body) => req(url, 'PUT', body);
-const del = async (url) => fetch(BASE + url, { method: 'DELETE' });
-
-const ok = (res, what) =>
-  assert.ok(res.status === 200 || res.status === 201, what + ': ' + JSON.stringify(res.json));
+// ครูทำงานผ่าน teacher client
+const post = (url, body) => teacher.post(url, body);
+const put = (url, body) => teacher.put(url, body);
+const del = (url) => teacher.del(url);
 
 before(async () => {
-  // เกมทดสอบ: ด่าน1(2 ข้อ) → ด่านว่าง(0 ข้อ ต้องถูกข้าม) → ด่าน2(1 ข้อ) → บอส(3 ข้อ)
+  const reg = await teacher.post('/api/auth/register', {
+    username: uniqueName('cq_choice_'),
+    password: 'test-password-123',
+    name: 'ครูทดสอบ E2E',
+  });
+  ok(reg, 'สมัครบัญชีครูไม่สำเร็จ');
+  assert.ok(teacher.jar.get('cq_session'), 'ต้องได้คุกกี้เซสชันหลังสมัคร');
+
+  // เกมทดสอบ: ด่าน1(2 ข้อ) → ด่านว่าง(0 ข้อ ต้องถูกข้าม) → ด่าน2(1 ข้อ) → บอส(4 ข้อ)
   const g = await post('/api/games', {
     name: 'E2E choice test',
     subject: 'ทดสอบ',
@@ -84,9 +89,11 @@ before(async () => {
   ok(st, 'สร้างนักเรียนทดสอบไม่สำเร็จ');
   studentId = st.json.data.id;
 
-  const p = await post('/api/players', { gameId, studentId });
+  // เข้าห้องด้วย client ของนักเรียน — ต้องได้คุกกี้ cq_student ไปตอบข้อ
+  const p = await student.post('/api/players', { gameId, studentId });
   ok(p, 'สร้าง player ไม่สำเร็จ');
   playerId = p.json.data.id;
+  assert.ok(student.jar.get('cq_student'), 'ต้องได้คุกกี้ผู้เล่นหลังเข้าห้อง');
 });
 
 after(async () => {
@@ -96,9 +103,24 @@ after(async () => {
   if (studentId) await del('/api/students/' + studentId);
 });
 
-const getPlayer = () => fetch(`${BASE}/api/players?id=${playerId}`).then((x) => x.json());
+// ⚠️ ตอบข้อ/เลื่อนข้อ ต้องใช้ client ของนักเรียน — route ผูกกับคุกกี้ cq_student
+//    ไม่ใช่ค่าที่ส่งมา (เดิมรับ playerId จากผู้เรียก ใครก็ตอบแทนเพื่อนได้)
+const getPlayer = () => teacher.get(`/api/players?id=${playerId}`).then((x) => x.json);
 const answer = (missionIdx, questionId, selectedAnswer) =>
-  post('/api/answers', { playerId, gameId, missionId: missionIds[missionIdx], questionId, selectedAnswer, timeTakenSec: 5 });
+  student.post('/api/answers', {
+    playerId, gameId, missionId: missionIds[missionIdx], questionId, selectedAnswer, timeTakenSec: 5,
+  });
+const advance = () => student.post('/api/players/advance', { playerId });
+
+// ดูสถิตินักเรียนหลังบอสตาย — ต้องเป็นครู
+const readStudents = () => teacher.get('/api/students').then((x) => x.json);
+const findStudent = async () => {
+  const list = await readStudents();
+  return (list.data || []).find((x) => x.id === studentId);
+};
+
+// GET /api/sessions เปิดสาธารณะ (นักเรียน poll) และเป็นจุดที่เรียก settleBossDefeat
+const pollSessions = () => fetch(`${BASE}/api/sessions?gameId=${gameId}`).catch(() => {});
 
 test('เข้าเกมแล้วเริ่มที่ด่านแรก ข้อแรก', async () => {
   const r = await getPlayer();
@@ -167,7 +189,7 @@ test('ตอบซ้ำข้อเดิม (แม้เคยตอบผิ
 });
 
 test('กด "ไปข้อถัดไป" -> เดินหน้าข้ามข้อที่ตอบผิด', async () => {
-  const r = await post('/api/players/advance', { playerId });
+  const r = await advance();
   ok(r, 'เรียก advance');
   assert.equal(r.json.data.bossPos, 2, 'ต้องขยับจากข้อที่ตอบผิดไปข้อถัดไป');
   assert.equal(r.json.data.bossDone, false);
@@ -189,7 +211,7 @@ test('ตอบบอสข้อสุดท้ายถูก -> บอสต�
 });
 
 test('ตอบครบแล้วสั่งเดินหน้าต่อ = ไม่พัง (ยังอยู่ที่เดิม)', async () => {
-  const r = await post('/api/players/advance', { playerId });
+  const r = await advance();
   ok(r, 'เรียก advance');
   assert.equal(r.json.data.bossDone, true);
 });
@@ -200,16 +222,13 @@ test('บอสตาย -> คะแนนเข้าสถิติถาว�
   let rolled = false;
   for (let i = 0; i < 20 && !rolled; i++) {
     await new Promise((r) => setTimeout(r, 400));
-    // GET /api/sessions คือจุดที่เรียก settleBossDefeat → ต้องเรียกด้วย
-    await fetch(`${BASE}/api/sessions?gameId=${gameId}`).catch(() => {});
-    const list = await fetch(`${BASE}/api/students`).then((x) => x.json());
-    const s = (list.data || []).find((x) => x.id === studentId);
+    await pollSessions();
+    const s = await findStudent();
     if (s && (s.gamesPlayed || 0) > 0) rolled = true;
   }
   assert.ok(rolled, 'รอสถิตินักเรียนไม่สำเร็จ (บอสควรตายแล้ว)');
 
-  const list = await fetch(`${BASE}/api/students`).then((x) => x.json());
-  const s = (list.data || []).find((x) => x.id === studentId);
+  const s = await findStudent();
   assert.equal(s.gamesPlayed, 1, 'เล่นจบ 1 ครั้ง แต่ได้ ' + s.gamesPlayed);
   assert.equal(s.correctAnswers, 6, 'ถูก 6 ข้อ แต่ได้ ' + s.correctAnswers);
   assert.equal(s.totalAnswers, 7, 'ตอบ 7 ครั้ง แต่ได้ ' + s.totalAnswers);

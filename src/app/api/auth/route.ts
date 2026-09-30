@@ -1,85 +1,81 @@
+// ==================== ข้อมูลบัญชี / โปรไฟล์ / ออกจากระบบ ====================
+//
+// ⚠️ เปลี่ยนจากเดิม: เดิมใช้ PIN 4 หลักที่ตั้งไว้ทั้งระบบ (คนเดียวทั้งชั้น)
+//    ตอนนี้ทุกครูมี username + password ของตัวเอง และข้อมูลถูกแยกตามเจ้าของ
+//    เข้าสู่ระบบ → POST /api/auth/login | สมัคร → POST /api/auth/register
+//
+// ไม่มีการ "รีเซ็ตรหัสผ่าน" แบบไม่ต้องมีรหัสเดิม เพราะถ้ามีทางนั้น
+// ใครก็ยิง endpoint รีเซ็ตแล้วเข้าทั้งระบบได้ — ลืมก็ต้องสมัครใหม่
+
 import { NextResponse } from 'next/server';
-import { verifyPin, getTeacher, saveTeacher, getSettings } from '@/lib/db';
-import { errorMessage } from '@/lib/api-error';
+import {
+  updateAccountProfile,
+  countAccounts,
+  deleteAuthSession,
+} from '@/lib/db';
+import {
+  clearSessionCookie,
+  requireAccount,
+  readSessionToken,
+  getCurrentAccount,
+} from '@/lib/auth-server';
+import { safe, errorMessage } from './_shared';
 
-// POST เข้าสู่ระบบครู — ตรวจ PIN แล้วตั้ง/อัปเดตชื่อครู
-export async function POST(request: Request) {
-  try {
-    const { pin, name, avatar } = await request.json();
+export const dynamic = 'force-dynamic';
 
-    if (!pin) {
-      return NextResponse.json({ success: false, error: 'กรอก PIN ก่อนครับ' }, { status: 400 });
-    }
+// ---------------- GET ข้อมูลบัญชีปัจจุบัน ----------------
 
-    const isValid = await verifyPin(String(pin));
-    if (!isValid) {
-      return NextResponse.json(
-        { success: false, error: 'รหัส PIN ไม่ถูกต้อง' },
-        { status: 401 }
-      );
-    }
-
-    const existing = await getTeacher();
-    const teacherName = (name || existing.name || '').trim();
-
-    // ยังไม่มีชื่อ → บอก client ให้ไปหน้าตั้งชื่อ
-    if (!teacherName) {
-      return NextResponse.json({ success: true, needsName: true, data: existing });
-    }
-
-    const teacher = await saveTeacher({ name: teacherName, avatar: avatar || existing.avatar });
-    return NextResponse.json({ success: true, data: teacher });
-  } catch (err) {
-    return NextResponse.json({ success: false, error: errorMessage(err, 'เข้าสู่ระบบไม่สำเร็จ') }, { status: 500 });
-  }
-}
-
-// GET ข้อมูลครูปัจจุบัน
 export async function GET() {
   try {
-    const teacher = await getTeacher();
-    const settings = await getSettings();
+    const account = await getCurrentAccount();
+    // ไม่ล็อกอินก็ไม่ error — เพราะหน้าเว็บต้องถามทุกครั้งว่า "เข้าสู่ระบบแล้วหรือยัง"
     return NextResponse.json({
       success: true,
-      data: { ...teacher, hasPin: Boolean(settings.teacherPin) },
+      data: safe(account),
+      needsName: Boolean(account && !String(account.name || '').trim()),
+      hasAccounts: (await countAccounts()) > 0,
     });
   } catch (err) {
-    return NextResponse.json({ success: false, error: errorMessage(err, 'โหลดข้อมูลไม่สำเร็จ') }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: errorMessage(err, 'โหลดข้อมูลไม่สำเร็จ') },
+      { status: 500 }
+    );
   }
 }
 
-// PUT อัปเดตชื่อ/avatar ครู
+// ---------------- PUT แก้ชื่อ/รูปครู ----------------
+
 export async function PUT(request: Request) {
   try {
-    const { name, avatar } = await request.json();
+    const auth = await requireAccount();
+    if (auth instanceof NextResponse) return auth;
+
+    const { name, avatar } = await request.json().catch(() => ({}));
     if (!name || !String(name).trim()) {
       return NextResponse.json({ success: false, error: 'กรอกชื่อครูด้วยครับ' }, { status: 400 });
     }
-    const teacher = await saveTeacher({ name, avatar });
-    return NextResponse.json({ success: true, data: teacher });
+    const account = await updateAccountProfile(auth.ownerId, { name, avatar });
+    return NextResponse.json({ success: true, data: safe(account) });
   } catch (err) {
-    return NextResponse.json({ success: false, error: errorMessage(err, 'บันทึกไม่สำเร็จ') }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: errorMessage(err, 'บันไม่สำเร็จ') },
+      { status: 500 }
+    );
   }
 }
 
-// PATCH เปลี่ยน PIN
-export async function PATCH(request: Request) {
+// ---------------- DELETE ออกจากระบบ ----------------
+// ลบเซสชันฝั่งเซิร์ฟเวอร์ด้วย ไม่ใช่แค่ล้างคุกกี้ — ไม่งั้นโทเคนยังใช้ได้อยู่
+
+export async function DELETE() {
   try {
-    const { currentPin, newPin } = await request.json();
-    if (!newPin || String(newPin).length < 4) {
-      return NextResponse.json(
-        { success: false, error: 'PIN ใหม่ต้องมีอย่างน้อย 4 หลัก' },
-        { status: 400 }
-      );
-    }
-    const ok = await verifyPin(String(currentPin || ''));
-    if (!ok) {
-      return NextResponse.json({ success: false, error: 'PIN ปัจจุบันไม่ถูกต้อง' }, { status: 401 });
-    }
-    const { updateSettings } = await import('@/lib/db');
-    const settings = await updateSettings({ teacherPin: String(newPin) });
-    return NextResponse.json({ success: true, data: { ok: true, pin: settings.teacherPin } });
+    await deleteAuthSession(readSessionToken());
+    const res = NextResponse.json({ success: true });
+    return clearSessionCookie(res);
   } catch (err) {
-    return NextResponse.json({ success: false, error: errorMessage(err, 'เปลี่ยน PIN ไม่สำเร็จ') }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: errorMessage(err, 'ออกจากระบบไม่สำเร็จ') },
+      { status: 500 }
+    );
   }
 }

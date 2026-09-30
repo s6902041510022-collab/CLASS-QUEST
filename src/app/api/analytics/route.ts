@@ -1,30 +1,31 @@
 import { NextResponse } from 'next/server';
-import { getDb, getGame, getMissions, getAllPlayers, getStudents, getSessions } from '@/lib/db';
+import { getMissions, getAllPlayers, getStudents, getSessions, getAllGames } from '@/lib/db';
 import { questionToTask, answerLabel, correctLabel } from '@/lib/mission-tasks';
+import { requireAccount, requireOwnedGame } from '@/lib/auth-server';
 import { errorMessage } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
-// GET /api/analytics?gameId=xxx → สรุปผลการเล่นทั้งเกม
-// GET /api/analytics            → สรุปรวมทุกเกม
+// สรุปผลการเล่น — เฉพาะเจ้าของเกม
+// เดิมเปิดสาธารณะ ใครยิง gameId ของคนอื่นก็เห็นคะแนนนักเรียนทั้งห้องได้
 export async function GET(request: Request) {
   try {
     const gameId = new URL(request.url).searchParams.get('gameId');
 
     if (!gameId) {
-      return NextResponse.json({ success: true, data: await overview() });
+      const auth = await requireAccount();
+      if (auth instanceof NextResponse) return auth;
+      return NextResponse.json({ success: true, data: await overview(auth.ownerId) });
     }
 
-    const game = await getGame(gameId);
-    if (!game) {
-      return NextResponse.json({ success: false, error: 'ไม่พบเกม' }, { status: 404 });
-    }
+    const auth = await requireOwnedGame(gameId);
+    if (auth instanceof NextResponse) return auth;
 
     const [missions, players, sessions, roster] = await Promise.all([
-      getMissions(gameId),
+      getMissions(gameId, auth.ownerId),
       getAllPlayers(gameId),
       getSessions(gameId),
-      getStudents(),
+      getStudents(auth.ownerId),
     ]);
 
     // --- สรุปต่อนักเรียน ---
@@ -99,7 +100,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       success: true,
       data: {
-        game,
+        game: auth.game,
         sessions: sessions.length,
         students: byStudent,
         questions,
@@ -118,10 +119,18 @@ export async function GET(request: Request) {
   }
 }
 
-// สรุปรวมทุกเกม
-async function overview() {
-  const db = await getDb();
-  const { games, students, players } = db.data;
+// สรุปรวมทุกเกม — เฉพาะของครูคนนี้
+// เดิมอ่าน db.data.games / db.data.students ตรง ๆ ซึ่งคือทุกคนในระบบ
+async function overview(ownerId: string) {
+  // getAllPlayers ไม่มี ownerId แต่ผูกกับเกมเสมอ จึงกรองผ่านรายชื่อเกมของครูคนนี้
+  const games = await getAllGames(ownerId);
+  const students = await getStudents(ownerId);
+  const gameIds = new Set(games.map((g: any) => g.id));
+  const allPlayers = (await Promise.all(games.map((g: any) => getAllPlayers(g.id))))
+    .flat()
+    .filter((p: any) => gameIds.has(p.gameId));
+  const players = allPlayers;
+
   return {
     games: games.map((g: any) => {
       const gp = players.filter((p: any) => p.gameId === g.id);

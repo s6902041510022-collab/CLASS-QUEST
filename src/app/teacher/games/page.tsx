@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { isTeacherLoggedIn } from '@/lib/auth';
+import { getTeacherSession } from '@/lib/auth';
 import TeacherHeader from '@/components/TeacherHeader';
 
 type Game = {
@@ -66,11 +66,13 @@ export default function TeacherGamesPage() {
   }, []);
 
   useEffect(() => {
-    if (!isTeacherLoggedIn()) {
-      router.replace('/teacher/login');
-      return;
-    }
-    loadGames();
+    getTeacherSession().then((session) => {
+      if (!session) {
+        router.replace('/teacher/login');
+        return;
+      }
+      loadGames();
+    });
   }, [router, loadGames]);
 
   const openEdit = (game: Game) => {

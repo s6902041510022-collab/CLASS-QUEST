@@ -210,8 +210,8 @@ export default function LiveGameControlPage({ params }: { params: { id: string }
     updateSession({ status: 'completed', endedAt: new Date().toISOString() });
   };
 
-  const handleLogout = () => {
-    clearTeacherSession();
+  const handleLogout = async () => {
+    await clearTeacherSession();
     router.push('/teacher/login');
   };
 
