@@ -9,7 +9,7 @@
 
 import { NextResponse } from 'next/server';
 import { getStudent, getGame, updateStudent, deleteStudent, getStudentHistory, getGroups } from '@/lib/db';
-import { requireAccount, currentPlayer, notFound } from '@/lib/auth-server';
+import { requireAccount, currentPlayer, notFound, publicStudent } from '@/lib/auth-server';
 import { errorMessage } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -37,7 +37,8 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     const game = await getGame(player.gameId);
     const me = game ? await getStudent(params.id, game.ownerId || '') : null;
     if (!me) return notFound();
-    return NextResponse.json({ success: true, data: me });
+    // ตัด ownerId ออก — นักเรียนไม่จำเป็นต้องรู้ว่าเกมเป็นของครูคนไหน
+    return NextResponse.json({ success: true, data: publicStudent(me) });
   } catch (err) {
     return NextResponse.json(
       { success: false, error: errorMessage(err, 'โหลดข้อมูลไม่สำเร็จ') },

@@ -120,6 +120,37 @@ describe('นักเรียนเข้าเกมได้โดยไม�
     const r = await anon.get(`/api/students/${student.id}`);
     ok(r, 'นักเรียนอ่านข้อมูลตัวเองได้');
     assert.equal(r.json.data.id, student.id);
+    assert.ok(!('ownerId' in r.json.data), 'นักเรียนต้องไม่เห็น ownerId ของตัวเอง');
+  });
+
+  // ⚠️ ชุดนี้เจอตอนยิงเซิร์ฟเวอร์จริงหลัง deploy ไม่ใช่จากเทสต์
+  //    ownerId รั่วออกไปกับทุก record ที่สร้างผ่าน API เพราะ newStudent() เขียน field นี้
+  //    แต่นักเรียน 4 คนใน db.default.json ไม่มี field นี้ → ตอนเทสต์บนเครื่องมักไม่เห็น
+  //    การจะดูได้ต้องสร้างนักเรียนใหม่ผ่าน API แล้วอ่านกลับมาทางเส้นทางของนักเรียน
+  test('รายชื่อที่อ่านด้วยรหัสห้อง ต้องไม่มี ownerId ของครูติดไปด้วย', async () => {
+    const made = await teacher.post('/api/students', { name: 'คนที่เพิ่งสร้างเพื่อเช็กการรั่ว' });
+    ok(made, 'ครูสร้างนักเรียนใหม่');
+    // กันเทสต์ตัวเองตั้งแต่ต้นว่า field นี้มีอยู่จริง — ไม่งั้นที่ทดสอบจะผ่านเปล่า ๆ
+    assert.ok('ownerId' in made.json.data, 'นักเรียนที่สร้างผ่าน API ต้องมี ownerId ในข้อมูลดิบ');
+
+    const r = await anon.get(`/api/students?gameId=${game.id}&roomCode=${roomCode}`);
+    ok(r, 'อ่านรายชื่อด้วยรหัสห้องได้');
+    assert.ok(r.json.data.length > 0, 'ต้องได้รายชื่อไม่ว่าง');
+    for (const s of r.json.data) {
+      assert.ok(!('ownerId' in s), `ห้ามส่ง ownerId ให้นักเรียน (${s.name})`);
+      assert.ok(!('completedSessions' in s), `ห้ามส่งประวัติรอบเล่นของคนอื่นให้ (${s.name})`);
+    }
+  });
+
+  test('เพิ่มชื่อเองด้วยรหัสห้อง ได้ id กลับมาแต่ไม่ได้ ownerId ของครู', async () => {
+    const r = await anon.post('/api/students', {
+      gameId: game.id,
+      roomCode,
+      name: 'คนที่เพิ่งเพิ่มชื่อเอง',
+    });
+    assertStatus(r, [201], 'เพิ่มชื่อเองได้');
+    assert.ok(r.json.data.id, 'ต้องได้ id กลับมาไปใช้ต่อ');
+    assert.ok(!('ownerId' in r.json.data), 'ห้ามส่ง ownerId ตามมา');
   });
 
   test('อ่านข้อมูลนักเรียนคนอื่นไม่ได้ (ผ่านคุกกี้ผู้เล่นของตัวเอง)', async () => {

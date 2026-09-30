@@ -183,6 +183,31 @@ export function publicGame(game: any) {
 }
 
 /**
+ * ตัดข้อมูลที่นักเรียนไม่ควรเห็นออกจาก "นักเรียน 1 คน" ก่อนส่ง
+ *
+ * ⚠️ เจอตอนยิงเซิร์ฟเวอร์จริงหลัง deploy: GET /api/students คืน ownerId ของครู
+ *    ให้คนที่มีรหัสห้องไปอ่านได้ (ตอนนั้นระบบในเครื่องยังไม่มี field นี้
+ *    เลยไม่เห็นตอนเทสต์ — ต้องยิงของจริงถึงจะเจอ)
+ *
+ * ตัด 2 อย่าง:
+ * - ownerId         = กุญแจของครู ไม่มีหน้าไหนที่ฝั่งนักเรียนใช้
+ * - completedSessions = id ของรอบที่นักเรียนคนนั้นเคยเล่น ไม่จำเป็นต่อการเลือกชื่อ
+ *
+ * เก็บไว้: id/name/avatar/totalXp/gamesPlayed/correctAnswers/lastSeenAt/groupId
+ * (หน้าเลือกชื่อ + หน้าผลวิเคราะห์ใช้)
+ */
+export function publicStudent<T extends Record<string, any>>(student: T) {
+  if (!student) return student;
+  const { ownerId, completedSessions, ...rest } = student as Record<string, any>;
+  return rest as Omit<T, 'ownerId' | 'completedSessions'>;
+}
+
+/** ใช้กับรายชื่อที่อ่านทั้งห้อง (หน้าเลือกชื่อของนักเรียน) */
+export function publicStudents<T extends Record<string, any>>(students: T[]) {
+  return Array.isArray(students) ? students.map((s) => publicStudent(s)) : [];
+}
+
+/**
  * ตัดเฉลยออกจากภารกิจก่อนส่งให้นักเรียน
  *
  * ⚠️ จุดที่เคยรั่ว: /api/missions เปิดสาธารณะมานาน ทำให้นักเรียนอ่าน correctAnswer

@@ -13,7 +13,7 @@
 
 import { NextResponse } from 'next/server';
 import { getStudents, addStudent, getGame } from '@/lib/db';
-import { getCurrentAccount, requireRoomCode } from '@/lib/auth-server';
+import { getCurrentAccount, requireRoomCode, publicStudent, publicStudents } from '@/lib/auth-server';
 import { errorMessage } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -58,7 +58,12 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const owner = await resolveOwner(searchParams);
     if (owner instanceof NextResponse) return owner;
-    return NextResponse.json({ success: true, data: await getStudents(owner.ownerId) });
+    const students = await getStudents(owner.ownerId);
+    // ครูเจ้าของได้ข้อมูลเต็ม / คนที่มีรหัสห้องได้เฉพาะที่จำเป็นต่อการเลือกชื่อ
+    return NextResponse.json({
+      success: true,
+      data: owner.isTeacher ? students : publicStudents(students),
+    });
   } catch (err) {
     return NextResponse.json(
       { success: false, error: errorMessage(err, 'โหลดรายชื่อไม่สำเร็จ') },
@@ -94,7 +99,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'กรอกชื่อนักเรียน' }, { status: 400 });
     }
     const student = await addStudent(String(name), owner.ownerId, avatar);
-    return NextResponse.json({ success: true, data: student }, { status: 201 });
+    // คนที่เพิ่มชื่อเองด้วยรหัสห้อง ต้องได้ id ของตัวเอง (หน้าเล่นใช้)
+    // แต่ไม่ได้ ownerId ของครูตามมา
+    return NextResponse.json(
+      { success: true, data: owner.isTeacher ? student : publicStudent(student) },
+      { status: 201 }
+    );
   } catch (err) {
     return NextResponse.json(
       { success: false, error: errorMessage(err, 'เพิ่มรายชื่อไม่สำเร็จ') },
