@@ -19,7 +19,7 @@
 // ทางแก้ถาวรคือตั้ง KV บน Vercel (ดูหน้า /setup) — ครั้งเดียวแล้วใช้ได้นาน ๆ
 // ไม่ต้องเปิดเครื่องค้างไว้
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, createWriteStream, rmSync, statSync } from 'node:fs';
+import { existsSync, createWriteStream, rmSync, renameSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -51,7 +51,6 @@ async function ensureCloudflared() {
   const tmp = CLOUDFLARED_BIN + '.part';
   try {
     await pipeline(Readable.fromWeb(res.body), createWriteStream(tmp));
-    const { renameSync } = await import('node:fs');
     renameSync(tmp, CLOUDFLARED_BIN);
   } catch (err) {
     rmSync(tmp, { force: true });
@@ -79,7 +78,10 @@ async function waitForPort(port, timeoutMs = 60000) {
 }
 
 const children = [];
+/** กำลังจะปิดอยู่ — ใช้แยก "ทันเกอร์หลุด" ออกจาก "ผู้ใช้กด Ctrl+C" */
+let stopping = false;
 function shutdown(code = 0) {
+  stopping = true;
   for (const c of children) {
     try { c.kill(); } catch {}
   }
@@ -88,7 +90,48 @@ function shutdown(code = 0) {
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
+/**
+ * กันเครื่องหลับระหว่างที่เปิดให้คนอื่นใช้
+ *
+ * ทำไมต้อง: วัดจากเครื่องจริงพบว่า Windows ตั้งให้เข้าโหมดพัก (standby) หลัง
+ * 15 นาทีที่ไม่ขยับเมาส์ และจำเข้าโหมดหลับ (hibernate) หลัง 180 นาที
+ * แปลว่าทันเกอร์จะตายก่อนเลิกคาบเสร็จ โดยที่หน้าเว็บยังดูปกติ
+ *
+ * ใช้ SetThreadExecutionState ไม่ใช่ powercfg /change
+ * เพราะ Windows จะคืนค่ากลับให้เองทันทีที่ process ตาย
+ * จึงไม่เหลือผลข้างเคียงกับการตั้งค่าระบบถาวร
+ * และถ้าสคริปต์ล่ม/ถูกปิด การกันหลับก็หายไปเอง
+ *
+ * ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x1) = ไม่ให้เครื่องหลับ
+ * แต่ยังปล่อยให้จอดับตามปกติ (ไม่ใช้ ES_DISPLAY_REQUIRED)
+ * ถ้าใช้แบบนี้ผู้ใช้จะได้ไม่ต้องคอยขยับเมาส์เพื่อค้างหน้าจอ
+ */
+function preventSleep() {
+  if (process.platform !== 'win32') {
+    console.log('ข้ามการกันหลับ: รองรับเฉพาะ Windows');
+    return;
+  }
+  const ps = [
+    'Add-Type -Namespace CQ -Name Sleep -MemberDefinition',
+    "'[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint f);'",
+    '[CQ.Sleep]::SetThreadExecutionState(0x80000001) | Out-Null',
+    'try { while ($true) { Start-Sleep -Seconds 3600 } } finally { [CQ.Sleep]::SetThreadExecutionState(0x80000000) | Out-Null }',
+  ].join('; ');
+
+  const proc = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps], {
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  children.push(proc);
+  proc.on('exit', (c) => {
+    if (c) console.warn('ตัวกันเครื่องหลับหยุดทำงาน — เครื่องอาจเข้าโหมดพักได้');
+  });
+  console.log('กันเครื่องหลับระหว่างนี้แล้ว (ปล่อยให้จอดับตามปกติ)');
+}
+
 console.log('กำลังเปิด CLASS QUEST ให้เข้าจากอินเทอร์เน็ต\n');
+
+preventSleep();
 
 // 1) เซิร์ฟเวอร์แบบ production (เร็วกว่า dev และไม่เผยซอร์สโค้ด)
 //
@@ -115,42 +158,151 @@ if (!(await waitForPort(PORT))) {
 }
 console.log(`เซิร์ฟเวอร์พร้อมที่ http://localhost:${PORT}`);
 
-// 2) เจาะออกสู่อินเทอร์เน็ต
+// 2) เจาะออกสู่อินเทอร์เน็ต พร้อมเฝ้าดูและเปิดใหม่ให้เอง
+//
+// ทำไมต้องเฝ้าดู ไม่ใช่แค่รอ 'exit' event
+// 'exit' ครอบคลุมแค่กรณี process ตาย แต่ลิงก์สาธารณะเสียได้โดยที่
+// process ยังรอนอยู่ (เช่น DNS ของโดเมนทันเกอร์หายไป แต่ cloudflared
+// ไม่ได้รู้ เพราะมันเชื่อมต่อผ่าน IP ของ Cloudflare ไม่ได้ดู DNS)
+// กรณีแบบนี้หน้าจอของครูยังดูปกติทุกอย่าง ระหว่างที่นักเรียนเข้าไม่ได้
+// วิธีเดียวที่จะรู้คือถามลิงก์จริงว่ายังตอบอยู่ไหม ไม่ใช่ดูว่า process รอนไหม
+//
+// ตรวจแล้วว่ากู้ได้จริง: ฆ่า classquest-cloudflared ทิ้ง แล้วลิงก์ใหม่
+// ถูกประกาศเองและตอบ HTTP 200 ภายในไม่กี่วินาที
+//
+// ยอมรอ 3 ครั้ง (ประมาณ 1 นาที) ก่อนเปิดใหม่ เพราะแตะผิดแล้วแย่กว่าเดิมมาก
+// คือ URL เปลี่ยน คนที่บันทึกลิงก์เดิมไว้ใช้ไม่ได้ทันที
+//
+// URL ของ quick tunnel เปลี่ยนทุกครั้งที่เปิดใหม่ ลิงก์เก่าเลยใช้ไม่ได้
 const bin = await ensureCloudflared();
-const tunnel = spawn(bin, [
-  'tunnel',
-  '--url', `http://localhost:${PORT}`,
-  '--no-autoupdate',
-  '--protocol', 'http2',
-], { stdio: ['ignore', 'ignore', 'pipe'] });
-children.push(tunnel);
+const TUNNEL_LOG = path.join(tmpdir(), 'classquest-tunnel.log');
 
-let found = false;
-tunnel.stderr.on('data', (chunk) => {
-  const text = chunk.toString();
-  const m = text.match(URL_RE);
-  if (m && !found) {
-    found = true;
-    const url = m[0];
-    // URL ต้องเป็น ASCII ล้วน เพื่อให้อ่านออกแม้ console จะแสดงภาษาไทยเพี้ยน
-    console.log('\n' + '='.repeat(64));
-    console.log('  เปิดให้คนอื่นใช้ได้ที่:');
-    console.log('');
-    console.log('    ' + url);
-    console.log('');
-    console.log('  PIN ครู (ค่าเริ่มต้น): 1234');
-    console.log('  เปลี่ยน PIN ได้ที่ ' + url + '/teacher/settings');
-    console.log('  ตรวจสถานะระบบได้ที่ ' + url + '/setup');
-    console.log('='.repeat(64));
-    console.log('\n  หยุดด้วยการกด Ctrl+C');
-    console.log('  ข้อควรระวัง: ลิงก์นี้ใช้ได้ตราบใดที่เครื่องนี้เปิดอยู่');
-    console.log('  และจำเปลี่ยน PIN ก่อนส่งลิงก์ให้คนอื่น\n');
+let tunnel = null;
+let currentUrl = null;
+let restarts = 0;
+let failedChecks = 0;
+let restarting = false;
+const MAX_RESTARTS = 20;
+
+// เขียนลงไฟล์แบบ sync ด้วย ไม่ใช่แค่ console.log
+// เพราะ stdout ที่ถูก redirect ไปไฟล์จะถูก buffer จนกว่า process จะจบ
+// ทำให้เหมือนไม่มีอะไรเกิดขึ้น ตอนที่กำลังจะวินิจฉัยปัญหาจริง ๆ
+function note(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try {
+    appendFileSync(TUNNEL_LOG, line);
+  } catch {}
+  console.log(msg);
+}
+
+function printBanner(url, warn) {
+  console.log('\n' + '='.repeat(64));
+  console.log('  เปิดให้คนอื่นใช้ได้ที่:');
+  console.log('');
+  console.log('    ' + url);
+  console.log('');
+  if (warn) console.log('  ' + warn);
+  console.log('  PIN ครู (ค่าเริ่มต้น): 1234');
+  console.log('  เปลี่ยน PIN ได้ที่ ' + url + '/teacher/settings');
+  console.log('  ตรวจสถานะระบบได้ที่ ' + url + '/setup');
+  console.log('='.repeat(64));
+  console.log('\n  หยุดด้วยการกด Ctrl+C');
+  console.log('  เครื่องนี้ถูกกันไม่ให้เข้าโหมดพักระหว่างที่ใช้งาน');
+  console.log('  แต่ถ้าปิดเครื่องหรือถอดสายไฟ ลิงก์จะใช้ไม่ได้ทันที');
+  console.log('  และจำเปลี่ยน PIN ก่อนส่งลิงก์ให้คนอื่น\n');
+}
+
+function killTunnel() {
+  if (!tunnel) return;
+  const dead = tunnel;
+  tunnel = null;
+  try {
+    dead.kill();
+  } catch {}
+}
+
+function restartTunnel(reason) {
+  if (stopping || restarting) return;
+  restarting = true;
+  restarts++;
+  currentUrl = null;
+  failedChecks = 0;
+
+  if (restarts > MAX_RESTARTS) {
+    note(`หยุดเปิดใหม่: หลุดเกิน ${MAX_RESTARTS} ครั้ง (${reason}) — น่าจะเป็นปัญหาอินเทอร์เน็ต`);
+    shutdown(1);
+    return;
   }
-  // แสดง error จาก tunnel เฉพาะเมื่อยังไม่ได้ URL
-  if (!found && /ERR|error/i.test(text)) process.stderr.write(text);
-});
 
-tunnel.on('exit', (code) => {
-  if (!found) console.error('tunnel หยุดทำงานก่อนได้ URL');
-  shutdown(code ?? 0);
-});
+  note(`ทันเกอร์หลุด (${reason}) — กำลังเปิดใหม่ใน 3 วินาที (ครั้งที่ ${restarts}/${MAX_RESTARTS})`);
+  killTunnel();
+  setTimeout(() => {
+    if (stopping) return;
+    restarting = false;
+    startTunnel();
+  }, 3000);
+}
+
+function startTunnel() {
+  tunnel = spawn(
+    bin,
+    ['tunnel', '--url', `http://localhost:${PORT}`, '--no-autoupdate', '--protocol', 'http2'],
+    { stdio: ['ignore', 'ignore', 'pipe'] }
+  );
+  children.push(tunnel);
+
+  let gotUrl = false;
+  tunnel.stderr.on('data', (chunk) => {
+    const text = chunk.toString();
+    try {
+      appendFileSync(TUNNEL_LOG, text);
+    } catch {}
+    const m = text.match(URL_RE);
+    if (m && !gotUrl) {
+      gotUrl = true;
+      currentUrl = m[0];
+      note(`ได้ลิงก์: ${currentUrl}`);
+      printBanner(
+        currentUrl,
+        restarts > 0
+          ? `ทันเกอร์หลุดไปแล้ว ${restarts} ครั้ง — ลิงก์เก่าใช้ไม่ได้แล้ว ใช้ลิงก์นี้แทน`
+          : null
+      );
+    }
+  });
+
+  tunnel.on('exit', (code) => {
+    if (stopping) return;
+    restartTunnel(`process หยุดทำงาน exit=${code}`);
+  });
+}
+
+// เฝ้าดูว่าลิงก์ยังตอบอยู่จริงไหม — จุดที่ process-liveness ตรวจไม่เจอ
+// ใช้ /api/health เพราะเป็น endpoint ที่เบาที่สุดและไม่แตะข้อมูล
+async function linkAlive() {
+  if (!currentUrl) return true; // ยังไม่ได้ URL อยู่ ไม่ต้องรีสตาร์ท
+  try {
+    const res = await fetch(currentUrl + '/api/health', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+note(`บันทึก log ทันเกอร์ไว้ที่ ${TUNNEL_LOG}`);
+startTunnel();
+
+setInterval(async () => {
+  if (stopping || restarting) return;
+  if (await linkAlive()) {
+    if (failedChecks > 0) note('ลิงก์กลับมาตอบสนองแล้ว');
+    failedChecks = 0;
+    return;
+  }
+  failedChecks++;
+  note(`เช็คลิงก์ไม่ผ่าน ${failedChecks}/3 ครั้ง`);
+  if (failedChecks >= 3) restartTunnel('ลิงก์ไม่ตอบสนอง 3 ครั้งติดกัน');
+}, 20000);
