@@ -185,11 +185,15 @@ export default function TeacherLoginPage() {
           </form>
         )}
 
+        {/* เคยแสดง PIN ตรงกลางหน้านี้ (ตอนที่ยังเป็นแค่เดโม)
+            แต่พอแชกให้นักเรียนแล้ว มันกลายเป็นการประกาศรหัสผ่านให้ทุกคนที่เปิดเว็บ
+            และแย่กว่านั้น พอครูเปลี่ยน PIN แล้ว หน้านี้ยังบอกค่าเก่าอยู่ ทำให้เข้าใจผิดว่าเปลี่ยนไม่ได้
+            เทสต์ scripts/no-pin-in-ui.test.mjs จับการกลับมาแบบนี้ได้
+            ถ้าลืม PIN ตอนนี้ไม่มีทางกู้ — ต้องไปที่ /setup ดูสถานะระบบ */}
         {step === 'pin' && (
-          <div className="mt-6 p-4 bg-sky-50 rounded-2xl text-center">
-            <p className="text-sm text-quest-text/60 mb-1">สำหรับทดสอบ</p>
-            <p className="text-lg font-bold text-quest-sky">PIN: 1234</p>
-          </div>
+          <p className="mt-6 text-sm text-quest-text/60 text-center">
+            PIN ตั้งไว้โดยครูเจ้าของระบบ
+          </p>
         )}
 
         {/* ล็อกอินไม่ได้บ่อยครั้งเพราะระบบเขียนฐานข้อมูลไม่ได้

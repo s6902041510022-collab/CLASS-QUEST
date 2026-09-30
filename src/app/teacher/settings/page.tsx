@@ -176,8 +176,11 @@ export default function TeacherSettingsPage() {
         {/* PIN */}
         <form onSubmit={changePin} className="card p-6">
           <h2 className="text-lg font-bold mb-1">เปลี่ยน PIN</h2>
+          {/* เคยเขียนบอกค่า PIN ปัจจุบันไว้ตรงนี้
+              แต่หน้านี้เปิดได้จากเบราว์เซอร์ ไม่ต้องล็อกอิน จึงเป็นการเปิดเผยรหัสผ่านให้คนอื่น
+              ถ้าครูเปลี่ยน PIN แล้วค่าที่เขียนไว้ก็ยังเป็นค่าเก่า ทำให้เข้าใจผิดว่าเปลี่ยนไม่ได้ */}
           <p className="text-sm text-quest-text/60 mb-5">
-            PIN ใช้เข้าสู่ระบบฝั่งครู ปัจจุบันคือ 1234
+            PIN ใช้เข้าสู่ระบบฝั่งครู ถ้าลืม ต้องตั้งใหม่ผ่านหน้าสถานะระบบ
           </p>
 
           <div className="grid sm:grid-cols-3 gap-4">
