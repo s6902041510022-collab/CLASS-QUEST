@@ -12,6 +12,7 @@ import {
   advancePlayerPosition,
 } from '@/lib/db';
 import { BOSS_DAMAGE_PER_CORRECT, BONUS_MAX_XP } from '@/lib/utils';
+import { questionToTask, gradeTask } from '@/lib/mission-tasks';
 
 // POST บันทึกคำตอบ 1 ข้อ (เขียนข้อมูลทั้งหมดในรอบเดียว เพื่อกันเขียนซ้อนแล้วข้อมูลหาย)
 export async function POST(request: Request) {
@@ -39,6 +40,9 @@ export async function POST(request: Request) {
     if (!question) {
       return NextResponse.json({ success: false, error: 'ไม่พบคำถาม' }, { status: 404 });
     }
+    // แปลงเป็น "งาน" หนึ่งครั้ง ใช้ทั้งตอบซ้ำและตรวจคำตอบ
+    // (รองรับทุกชนิด: ตัวเลือก / กรอกตัวเลข / จับคู่ — ตัวเลือกยังคงผลเดิมทุกประการ)
+    const task = questionToTask(question, 0);
 
     // ผู้เล่นรายล่าสุดใน db นี้ (เผื่อมีรอบอื่นเรียกพร้อมกัน)
     const player = db.data.players.find((p: any) => p.id === playerId);
@@ -54,8 +58,8 @@ export async function POST(request: Request) {
         data: {
           alreadyAnswered: true,
           correct: Boolean(prev.correct),
-          correctAnswer: prev.correctAnswer ?? question.correctAnswer,
-          explanation: question.explanation || '',
+          correctAnswer: prev.correctAnswer ?? task.correctAnswer,
+          explanation: task.explanation,
           xpGained: 0,
           totalXp: player.xp,
           posMission: Number(player.posMission) || 0,
@@ -68,7 +72,7 @@ export async function POST(request: Request) {
     }
 
     const isBossQuestion = mission?.type === 'boss';
-    const correct = Number(selectedAnswer) === Number(question.correctAnswer);
+    const { correct } = gradeTask(task, selectedAnswer);
     const xpGained = correct ? mission.xp || 100 : 0;
 
     // === โบนัส "ตอบเร็ว" — เฉพาะคำตอบที่ถูกเท่านั้น ===
@@ -94,9 +98,12 @@ export async function POST(request: Request) {
         id: randomUUID(),
         missionId,
         questionId,
-        questionText: question.text,
-        selectedAnswer: Number(selectedAnswer),
-        correctAnswer: Number(question.correctAnswer),
+        // kind/prompt เก็บไว้เผื่อภายหลังแก้คำถามแล้วอยากรู้ว่าเดิมเป็นชนิดไหน
+        // (คำถามเก่าไม่มี kind → undefined = ตัวเลือก)
+        kind: task.kind,
+        questionText: task.prompt,
+        selectedAnswer: task.kind === 'choice' ? Number(selectedAnswer) : selectedAnswer,
+        correctAnswer: task.kind === 'choice' ? Number(task.correctAnswer) : task.correctAnswer,
         correct,
         xp: xpGained,
         bonus: speedBonus,
@@ -156,8 +163,9 @@ export async function POST(request: Request) {
       success: true,
       data: {
         correct,
-        correctAnswer: question.correctAnswer,
-        explanation: question.explanation || '',
+        kind: task.kind,
+        correctAnswer: task.correctAnswer,
+        explanation: task.explanation,
         xpGained,
         speedBonus,
         totalXp: player.xp ?? 0,

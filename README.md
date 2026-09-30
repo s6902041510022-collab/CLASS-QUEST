@@ -24,10 +24,10 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/education-web.git
+git clone https://github.com/s6902041510022-collab/CLASS-QUEST.git
 
 # เข้าไปในโฟลเดอร์โปรเจกต์
-cd education-web
+cd CLASS-QUEST
 
 # ติดตั้ง dependencies
 npm install
@@ -35,8 +35,29 @@ npm install
 # สร้างไฟล์ .env.local
 cp .env.example .env.local
 
+# เตรียมเกมตัวอย่าง (ทำซ้ำได้ ไม่สร้างข้อมูลซ้ำ)
+npm run seed
+
 # รัน development server
 npm run dev
+```
+
+### เกมตัวอย่างที่ได้จาก `npm run seed`
+
+| id | ชื่อ | หมายเหตุ |
+| --- | --- | --- |
+| `demo-game-1` | จักรวาลแห่งข้อมูล | เกมตั้งต้น (มากับ `data/db.default.json`) |
+| `seed-game-2` | คลังข้อมูลมหัศจรรย์ | คำถามหลากหลายรูปแบบ |
+| `seed-game-3` | ทีมนักสำรวจคลังมหาสมุทร | เกมทีม |
+| `seed-game-4` | สามวิธีแก้ปัญหา | **คำถาม 3 ชนิด** — ตัวเลือก / กรอกตัวเลข / จับคู่ |
+
+> `seed-game-4` คือเกมที่ควรเปิดลองก่อน มีทั้ง 3 ชนิดคำถาม รวมถึงด่านบอสที่ผสมชนิดกัน
+
+## 🧪 การทดสอบ
+
+```bash
+npm test        # unit + e2e (ต้องเปิด dev server ที่พอร์ต 3000 สำหรับส่วน e2e)
+npm run check   # tsc --noEmit + production build
 ```
 
 ## 🔧 การตั้งค่า
@@ -54,7 +75,7 @@ npm run build
 # รัน production server
 npm start
 
-# Deploy ขึ้น Vercel (อัตโนมัติผ่าน GitHub Actions)
+# Deploy ขึ้น Vercel (อัตโนมัติเมื่อ push เข้า default branch)
 git push origin main
 ```
 

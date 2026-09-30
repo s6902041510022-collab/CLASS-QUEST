@@ -5,13 +5,18 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { isTeacherLoggedIn } from '@/lib/auth';
 import { BOSS_DAMAGE_PER_CORRECT } from '@/lib/utils';
+import { TASK_KINDS, normalizeKind, blankTask, type TaskKind } from '@/lib/mission-tasks';
 import TeacherHeader from '@/components/TeacherHeader';
 
+// คำถาม 1 ข้อ — ชนิดกำหนดด้วย field `kind` (ไม่มี = 'choice' แบบเดิม ข้อมูลเก่าใช้ต่อได้)
 type Question = {
   id: string;
+  kind?: string;
   text: string;
-  options: string[];
-  correctAnswer: number;
+  options?: string[];
+  correctAnswer?: any;
+  unit?: string;
+  pairs?: { a: string; b: string }[];
   explanation?: string;
 };
 
@@ -38,15 +43,15 @@ const uid = () =>
     ? globalThis.crypto.randomUUID()
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
-const blankQuestion = (): Question => ({
-  id: uid(),
-  text: '',
-  options: ['', '', '', ''],
-  correctAnswer: 0,
-  explanation: '',
-});
+const blankQuestion = (kind: TaskKind = 'choice'): Question => blankTask(uid(), kind);
 
-const blankForm = () => ({ title: '', xp: 100, timeLimit: 60, type: 'quiz' as 'quiz' | 'boss', questions: [] as Question[] });
+const blankForm = () => ({
+  title: '',
+  xp: 100,
+  timeLimit: 60,
+  type: 'quiz' as 'quiz' | 'boss',
+  questions: [] as Question[],
+});
 
 function MissionsBuilder() {
   const router = useRouter();
@@ -138,13 +143,29 @@ function MissionsBuilder() {
       xp: mission.xp ?? 100,
       timeLimit: mission.timeLimit ?? 60,
       type: mission.type === 'boss' ? 'boss' : 'quiz',
-      questions: (mission.questions || []).map((q) => ({
-        id: q.id || uid(),
-        text: q.text || '',
-        options: Array.isArray(q.options) && q.options.length === 4 ? q.options : ['', '', '', ''],
-        correctAnswer: typeof q.correctAnswer === 'number' ? q.correctAnswer : 0,
-        explanation: q.explanation || '',
-      })),
+      questions: (mission.questions || []).map((q) => {
+        const kind = normalizeKind(q);
+        const base = blankTask(q.id || uid(), kind);
+        return {
+          ...base,
+          text: q.text || '',
+          explanation: q.explanation || '',
+          ...(kind === 'choice'
+            ? {
+                options:
+                  Array.isArray(q.options) && q.options.length ? q.options : ['', '', '', ''],
+                correctAnswer: typeof q.correctAnswer === 'number' ? q.correctAnswer : 0,
+              }
+            : kind === 'numeric'
+              ? { correctAnswer: q.correctAnswer ?? '', unit: q.unit || '' }
+              : {
+                  pairs:
+                    Array.isArray(q.pairs) && q.pairs.length
+                      ? q.pairs.map((p: any) => ({ a: String(p?.a ?? ''), b: String(p?.b ?? '') }))
+                      : base.pairs,
+                }),
+        };
+      }),
     });
     setError('');
     setModalOpen(true);
@@ -162,10 +183,52 @@ function MissionsBuilder() {
       ...prev,
       questions: prev.questions.map((q) => {
         if (q.id !== questionId) return q;
-        const options = [...q.options];
+        const options = [...(q.options || [])];
         options[index] = value;
         return { ...q, options };
       }),
+    }));
+  };
+
+  /** เปลี่ยนชนิดของคำถาม — ล้างข้อมูลของชนิดเดิมทิ้ง (เพื่อไม่ให้ตกหล่นตอนบันทึก) */
+  const setQuestionKind = (questionId: string, kind: TaskKind) => {
+    setForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) =>
+        q.id === questionId ? { ...blankTask(q.id, kind), text: q.text, explanation: q.explanation } : q
+      ),
+    }));
+  };
+
+  const setPair = (questionId: string, index: number, side: 'a' | 'b', value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) => {
+        if (q.id !== questionId) return q;
+        const pairs = [...(q.pairs || [])];
+        pairs[index] = { a: pairs[index]?.a ?? '', b: pairs[index]?.b ?? '', [side]: value };
+        return { ...q, pairs };
+      }),
+    }));
+  };
+
+  const addPair = (questionId: string) => {
+    setForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) =>
+        q.id === questionId ? { ...q, pairs: [...(q.pairs || []), { a: '', b: '' }] } : q
+      ),
+    }));
+  };
+
+  const removePair = (questionId: string, index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) =>
+        q.id === questionId
+          ? { ...q, pairs: (q.pairs || []).filter((_, i) => i !== index) }
+          : q
+      ),
     }));
   };
 
@@ -195,12 +258,42 @@ function MissionsBuilder() {
       setError('เพิ่มคำถามอย่างน้อย 1 ข้อ');
       return;
     }
-    const incomplete = form.questions.some(
-      (q) => !q.text.trim() || q.options.some((o) => !o.trim())
-    );
-    if (incomplete) {
-      setError('กรอกคำถามและตัวเลือกให้ครบทุกช่อง');
-      return;
+    // ตรวจความครบถ้วนแยกตามชนิด (ตัวเลือก/กรอกตัวเลข/จับคู่)
+    for (let i = 0; i < form.questions.length; i++) {
+      const q = form.questions[i];
+      const no = i + 1;
+      if (!q.text.trim()) {
+        setError(`ยังไม่ได้ใส่คำถามข้อที่ ${no}`);
+        return;
+      }
+      if (normalizeKind(q) === 'choice') {
+        const opts = q.options || [];
+        if (opts.length < 2 || opts.some((o) => !String(o).trim())) {
+          setError(`ข้อที่ ${no}: กรอกตัวเลือกให้ครบทุกช่อง`);
+          return;
+        }
+        if (Number(q.correctAnswer) >= opts.length) {
+          setError(`ข้อที่ ${no}: เลือกคำตอบที่ถูกต้องด้วย`);
+          return;
+        }
+      } else if (normalizeKind(q) === 'numeric') {
+        if (String(q.correctAnswer ?? '').trim() === '') {
+          setError(`ข้อที่ ${no}: ใส่คำตอบตัวเลขที่ถูกต้อง`);
+          return;
+        }
+      } else {
+        const pairs = (q.pairs || []).filter((p) => p.a.trim() && p.b.trim());
+        if (pairs.length < 2) {
+          setError(`ข้อที่ ${no}: จับคู่อย่างน้อย 2 คู่ (ฝั่งซ้าย/ขวาต้องไม่ว่างและห้ามซ้ำกัน)`);
+          return;
+        }
+        const seenA = new Set(pairs.map((p) => p.a.trim()));
+        const seenB = new Set(pairs.map((p) => p.b.trim()));
+        if (seenA.size !== pairs.length || seenB.size !== pairs.length) {
+          setError(`ข้อที่ ${no}: จับคู่ซ้ำกัน — ทุกคู่ต้องไม่ซ้ำกันทั้งสองฝั่ง`);
+          return;
+        }
+      }
     }
 
     setSaving(true);
@@ -508,17 +601,24 @@ function MissionsBuilder() {
                   <label className="block text-sm font-medium">
                     คำถาม ({form.questions.length})
                   </label>
-                  <button
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        questions: [...prev.questions, blankQuestion()],
-                      }))
-                    }
-                    className="px-3 py-1.5 rounded-xl bg-quest-sky text-white text-sm font-medium hover:opacity-90"
-                  >
-                    + เพิ่มคำถาม
-                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {TASK_KINDS.map((k) => (
+                    <button
+                      key={k.value}
+                      onClick={() =>
+                        setForm((prev) => ({
+                          ...prev,
+                          questions: [...prev.questions, blankQuestion(k.value)],
+                        }))
+                      }
+                      title={k.hint}
+                      className="px-3 py-1.5 rounded-xl bg-quest-sky text-white text-sm font-medium hover:opacity-90"
+                    >
+                      + {k.label}
+                    </button>
+                  ))}
                 </div>
 
                 {form.questions.length === 0 ? (
@@ -555,6 +655,29 @@ function MissionsBuilder() {
                           </div>
                         </div>
 
+                        {/* เลือกชนิดคำถาม — เปลี่ยนชนิดแล้วข้อมูลของชนิดเดิมจะถูกล้าง */}
+                        <div className="mb-3">
+                          <label className="block text-xs font-medium text-quest-text/60 mb-1">
+                            ชนิดคำถาม
+                          </label>
+                          <select
+                            value={normalizeKind(question)}
+                            onChange={(e) =>
+                              setQuestionKind(question.id, e.target.value as TaskKind)
+                            }
+                            className="input"
+                          >
+                            {TASK_KINDS.map((k) => (
+                              <option key={k.value} value={k.value}>
+                                {k.label}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-xs text-quest-text/50 mt-1">
+                            {TASK_KINDS.find((k) => k.value === normalizeKind(question))?.hint}
+                          </p>
+                        </div>
+
                         <textarea
                           rows={2}
                           value={question.text}
@@ -563,37 +686,138 @@ function MissionsBuilder() {
                           className="input resize-none mb-3"
                         />
 
-                        <div className="space-y-2">
-                          {question.options.map((option, optionIndex) => (
-                            <div key={optionIndex} className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                name={`correct-${question.id}`}
-                                checked={question.correctAnswer === optionIndex}
-                                onChange={() =>
-                                  setQuestion(question.id, { correctAnswer: optionIndex })
-                                }
-                                className="w-5 h-5 shrink-0"
-                              />
-                              <span className="w-6 text-sm font-medium text-quest-text/60 shrink-0">
-                                {String.fromCharCode(65 + optionIndex)}
-                              </span>
-                              <input
-                                type="text"
-                                value={option}
-                                onChange={(e) =>
-                                  setOption(question.id, optionIndex, e.target.value)
-                                }
-                                placeholder={`ตัวเลือก ${String.fromCharCode(65 + optionIndex)}`}
-                                className="input flex-1"
-                              />
+                        {/* ---------- ตัวเลือก ---------- */}
+                        {normalizeKind(question) === 'choice' && (
+                          <>
+                            <div className="space-y-2">
+                              {(question.options || []).map((option, optionIndex) => (
+                                <div key={optionIndex} className="flex items-center gap-2">
+                                  <input
+                                    type="radio"
+                                    name={`correct-${question.id}`}
+                                    checked={Number(question.correctAnswer) === optionIndex}
+                                    onChange={() =>
+                                      setQuestion(question.id, { correctAnswer: optionIndex })
+                                    }
+                                    className="w-5 h-5 shrink-0"
+                                  />
+                                  <span className="w-6 text-sm font-medium text-quest-text/60 shrink-0">
+                                    {String.fromCharCode(65 + optionIndex)}
+                                  </span>
+                                  <input
+                                    type="text"
+                                    value={option}
+                                    onChange={(e) =>
+                                      setOption(question.id, optionIndex, e.target.value)
+                                    }
+                                    placeholder={`ตัวเลือก ${String.fromCharCode(65 + optionIndex)}`}
+                                    className="input flex-1"
+                                  />
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
+                            <p className="text-xs text-quest-text/60 mt-2">
+                              กดวงกลมข้างตัวเลือก เพื่อทำเครื่องหมายว่าเป็นคำตอบที่ถูกต้อง
+                            </p>
+                          </>
+                        )}
 
-                        <p className="text-xs text-quest-text/60 mt-2">
-                          กดวงกลมข้างตัวเลือก เพื่อทำเครื่องหมายว่าเป็นคำตอบที่ถูกต้อง
-                        </p>
+                        {/* ---------- กรอกตัวเลข ---------- */}
+                        {normalizeKind(question) === 'numeric' && (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1">
+                                <label className="block text-xs font-medium text-quest-text/60 mb-1">
+                                  คำตอบที่ถูกต้อง
+                                </label>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={String(question.correctAnswer ?? '')}
+                                  onChange={(e) =>
+                                    setQuestion(question.id, { correctAnswer: e.target.value })
+                                  }
+                                  placeholder="เช่น 1024"
+                                  className="input"
+                                />
+                              </div>
+                              <div className="w-32">
+                                <label className="block text-xs font-medium text-quest-text/60 mb-1">
+                                  หน่วย (ไม่บังคับ)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={question.unit || ''}
+                                  onChange={(e) => setQuestion(question.id, { unit: e.target.value })}
+                                  placeholder="เช่น บิต"
+                                  className="input"
+                                />
+                              </div>
+                            </div>
+                            <p className="text-xs text-quest-text/60">
+                              นักเรียนพิมพ์เฉพาะตัวเลข — ใส่หลายคำตอบที่ถือว่าถูกได้ด้วยเครื่องหมาย
+                              <span className="font-medium">|</span> เช่น{' '}
+                              <span className="font-medium">1024 | 1 024</span> (ระบบตัดลูกน้ำคั่นและ
+                              หน่วยท้ายให้เอง)
+                            </p>
+                          </div>
+                        )}
+
+                        {/* ---------- จับคู่ ---------- */}
+                        {normalizeKind(question) === 'match' && (
+                          <div>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-xs font-medium text-quest-text/60">
+                                คู่ที่จับ ({(question.pairs || []).length})
+                              </span>
+                              <button
+                                onClick={() => addPair(question.id)}
+                                className="px-2.5 py-1 rounded-lg bg-white hover:bg-gray-200 text-xs font-medium"
+                              >
+                                + คู่
+                              </button>
+                            </div>
+                            {(question.pairs || []).length === 0 ? (
+                              <p className="text-xs text-quest-text/50 p-3 bg-white rounded-xl">
+                                ยังไม่มีคู่ — กด &quot;+ คู่&quot; เพื่อเพิ่ม (อย่างน้อย 2 คู่)
+                              </p>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {(question.pairs || []).map((p, pi) => (
+                                  <div key={pi} className="flex items-center gap-1.5">
+                                    <span className="w-5 text-xs text-quest-text/40 shrink-0">
+                                      {pi + 1}
+                                    </span>
+                                    <input
+                                      type="text"
+                                      value={p.a}
+                                      onChange={(e) => setPair(question.id, pi, 'a', e.target.value)}
+                                      placeholder="ฝั่งซ้าย"
+                                      className="input flex-1"
+                                    />
+                                    <span className="text-quest-text/40 shrink-0">→</span>
+                                    <input
+                                      type="text"
+                                      value={p.b}
+                                      onChange={(e) => setPair(question.id, pi, 'b', e.target.value)}
+                                      placeholder="ฝั่งขวา"
+                                      className="input flex-1"
+                                    />
+                                    <button
+                                      onClick={() => removePair(question.id, pi)}
+                                      className="w-7 h-7 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 text-xs shrink-0"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-xs text-quest-text/60 mt-2">
+                              ฝั่งขวาจะถูกสลับลำดับให้นักเรียน — ทุกคู่ต้องไม่ซ้ำกันทั้งสองฝั่ง
+                            </p>
+                          </div>
+                        )}
 
                         <input
                           type="text"

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, getGame, getMissions, getAllPlayers, getStudents, getSessions } from '@/lib/db';
+import { questionToTask, answerLabel, correctLabel } from '@/lib/mission-tasks';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,21 +54,39 @@ export async function GET(request: Request) {
           (p.answers || []).filter((a: any) => a.questionId === q.id)
         );
         const correctCount = answers.filter((a: any) => a.correct).length;
-        const optionTally = (q.options || []).map((_: any, i: number) => ({
-          index: i,
-          count: answers.filter((a: any) => a.selectedAnswer === i).length,
-        }));
+        const task = questionToTask(q, 0);
+        // ตัวเลือก: นับทีละ index | ชนิดอื่น: นับทีละคำตอบที่ส่งมา (ข้อความสั้น ๆ อ่านง่ายกว่า)
+        const tally = new Map<string, number>();
+        const optionTally: any[] = [];
+        if (task.kind === 'choice') {
+          task.options.forEach((_, i) => {
+            optionTally.push({ index: i, count: answers.filter((a: any) => a.selectedAnswer === i).length });
+          });
+        } else {
+          for (const a of answers) {
+            const label = answerLabel(task, a.selectedAnswer);
+            tally.set(label, (tally.get(label) || 0) + 1);
+          }
+        }
+        const answerTally = [...tally.entries()]
+          .map(([label, count]) => ({ label, count }))
+          .sort((x, y) => y.count - x.count)
+          .slice(0, 8);
         return {
           questionId: q.id,
           missionId: m.id,
           missionTitle: m.title,
           text: q.text,
-          options: q.options || [],
-          correctAnswer: q.correctAnswer,
+          kind: task.kind,
+          options: task.options,
+          correctAnswer: task.correctAnswer,
+          unit: task.unit,
+          correctLabel: correctLabel(task),
           answered: answers.length,
           correct: correctCount,
           accuracy: answers.length > 0 ? Math.round((correctCount / answers.length) * 100) : 0,
           optionTally,
+          answerTally,
         };
       })
     );

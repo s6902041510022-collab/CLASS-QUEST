@@ -4,6 +4,7 @@ import { dirname } from 'path';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { BOSS_DAMAGE_PER_CORRECT } from './utils';
+import { missionToTasks } from './mission-tasks';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'db.json');
 const DB_SEED_PATH = path.join(process.cwd(), 'data', 'db.default.json');
@@ -232,6 +233,15 @@ function mergeValue(orig: any, mine: any, other: any): any {
 
   // อาร์เรย์ของรายการที่มี id — รวมทีละรายการ
   if (Array.isArray(mine) && Array.isArray(other)) {
+    // อาร์เรย์ที่ไม่มี id ให้เลย (เช่น คู่จับคู่ { a, b }) — รวมทีละรายการไม่ได้
+    // เพราะหา "รายการนี้คือรายการเดิม" ไม่ได้ ถ้าบังคับรวมจะทำให้ข้อมูลที่แก้หายเงียบ ๆ
+    // จึงต้องเทียบทั้งก้อน คล้ายอาร์เรย์ของค่าพื้นฐาน
+    const hasId = (arr: any): boolean => arr.some((r: any) => idOf(r) !== null);
+    if (!hasId(mine) && !hasId(other) && !hasId(Array.isArray(orig) ? orig : [])) {
+      if (same(mine, orig)) return other; // เราไม่ได้แก้
+      return mine; // เราแก้
+    }
+
     const origArr: any[] = Array.isArray(orig) ? orig : [];
     const origMap = new Map(origArr.map((r) => [idOf(r), r]).filter(([k]) => k !== null) as [string, any][]);
     const mineMap = new Map(mine.map((r) => [idOf(r), r]).filter(([k]) => k !== null) as [string, any][]);
@@ -555,7 +565,10 @@ export async function updatePlayer(id: string, updates: any) {
  * เลื่อนตำแหน่งของนักเรียนไปข้อถัดไป (โหมด "นักเรียนไปเอง" / self-paced)
  * - ยังอยู่ในด่านควิซ → ข้ามข้อถัดไปของ Mission นั้น (ข้าม Mission ที่ไม่มีคำถาม)
  * - ตอบครบทุกข้อควิซ → ตีตรา quizDone (ได้เข้าสู้บอสเมื่อครูกดเปิดด่านบอส)
- * - อยู่ในด่านบอส (ควิซผ่านแล้ว) → เลื่อนคำถามบอส ครบแล้วตีตรา bossDone
+ * - อยู่ในด่านบอส (ควิซผ่านแล้ว) → เลื่อนงานบอส ครบแล้วตีตรา bossDone
+ *
+ * นับด้วย missionToTasks() แทน questions.length → ด่านที่ไม่ใช่คำถามก็นับได้ถูก
+ * (สำหรับด่าน quiz/boss เดิม จำนวนงาน = questions.length เสมอ จึงไม่กระทบข้อมูลเก่า)
  * ทำงานบน player ในหน่วยความจำ — เรียกก่อน db.write() เพื่อเขียนรอบเดียว
  */
 export function advancePlayerPosition(db: any, player: any): void {
@@ -569,7 +582,7 @@ export function advancePlayerPosition(db: any, player: any): void {
 
   // อยู่ในด่านบอส และผ่านด่านควิซมาแล้ว → เลื่อนคำถามบอส
   if (session?.status === 'boss' && player.quizDone && bossMission) {
-    const total = bossMission.questions?.length || 0;
+    const total = missionToTasks(bossMission).length;
     const next = Math.max(0, Number(player.bossPos) || 0) + 1;
     if (next < total) {
       player.bossPos = next;
@@ -591,20 +604,20 @@ export function advancePlayerPosition(db: any, player: any): void {
   let qi = Math.max(0, Number(player.posQuestion) || 0);
   const startMi = mi;
 
-  // ข้าม Mission ที่ไม่มีคำถาม (ถ้าตัวอยู่จุดนั้น ให้เริ่มข้อแรกของ Mission ถัดไป)
-  while (mi < quiz.length && !(quiz[mi].questions?.length > 0)) mi++;
+  // ข้าม Mission ที่ไม่มีงานให้ทำ (ถ้าตัวอยู่จุดนั้น ให้เริ่มงานแรกของ Mission ถัดไป)
+  while (mi < quiz.length && missionToTasks(quiz[mi]).length === 0) mi++;
   if (mi >= quiz.length) {
     player.quizDone = true;
     return;
   }
   if (mi !== startMi) qi = 0;
 
-  if (qi + 1 < (quiz[mi].questions?.length || 0)) {
+  if (qi + 1 < missionToTasks(quiz[mi]).length) {
     qi += 1;
   } else {
-    // หมด Mission นี้ → Mission ถัดไปที่มีคำถาม
+    // หมด Mission นี้ → Mission ถัดไปที่ยังมีงาน
     mi += 1;
-    while (mi < quiz.length && !(quiz[mi].questions?.length > 0)) mi++;
+    while (mi < quiz.length && missionToTasks(quiz[mi]).length === 0) mi++;
     qi = 0;
   }
 

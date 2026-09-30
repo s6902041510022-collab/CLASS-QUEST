@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { MASCOT, BOSS_DAMAGE_PER_CORRECT } from '@/lib/utils';
+import { missionToTasks, answerLabel, correctLabel, type Task } from '@/lib/mission-tasks';
 
 export default function StudentGamePage({ params }: { params: { id: string } }) {
   const gameId = params.id;
@@ -13,7 +14,16 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
   const [session, setSession] = useState<any>(null);
   const [player, setPlayer] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<number | null>(null);
+  // คำตอบของงานปัจจุบัน: ตัวเลือก = index, กรอกตัวเลข = ข้อความ, จับคู่ = array ของ b-index
+  const [selected, setSelected] = useState<any>(null);
+  const [textValue, setTextValue] = useState('');
+  // จับคู่: bOrder = ลำดับการแสดงฝั่งขวา (สลับกัน), picks[aIndex] = b-index ที่เลือก
+  const [bOrder, setBOrder] = useState<number[]>([]);
+  const [picks, setPicks] = useState<(number | null)[]>([]);
+  const [activeLeft, setActiveLeft] = useState<number | null>(null);
+  const [wrongFlash, setWrongFlash] = useState<number | null>(null);
+  // ค่าที่ส่งไปล่าสุด — เก็บไว้ตอนตอบผิดเพื่อบอกเด็กว่าตัวเองตอบอะไรไป
+  const [lastSubmitted, setLastSubmitted] = useState<any>(null);
   const [answer, setAnswer] = useState<any>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -97,11 +107,25 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
   const isBossPhase = status === 'boss';
 
   // ลำดับเล่น = ด่านควิซก่อน แล้วด่านบอสต่อท้าย (ตรงกับเซิร์ฟเวอร์/หน้าครู)
-  const flowMissions = [...missions]
-    .sort((a: any, b: any) => a.order - b.order)
-    .sort((a: any, b: any) => (a.type === 'boss' ? 1 : 0) - (b.type === 'boss' ? 1 : 0));
-  const quizMissions = flowMissions.filter((m: any) => m.type !== 'boss');
-  const bossMission = flowMissions.find((m: any) => m.type === 'boss');
+  // ห่อด้วย useMemo: ถ้าไม่ห่อ อาร์เรย์นี้จะใหม่ทุกครั้งที่ render ทำให้ useMemo ของ task
+  // คำนวณใหม่ และล้างคำตอบที่เด็กเพิ่งเลือกทิ้งทุกครั้ง (ข้อมูลในอาร์เรย์ไม่ได้ถูกโคลนใหม่
+  // ตัว mission ที่อยู่ข้างในจึงยังคงตัวอ้างเดิม)
+  const quizMissions = useMemo(
+    () =>
+      [...missions]
+        .sort((a: any, b: any) => a.order - b.order)
+        .sort((a: any, b: any) => (a.type === 'boss' ? 1 : 0) - (b.type === 'boss' ? 1 : 0))
+        .filter((m: any) => m.type !== 'boss'),
+    [missions]
+  );
+  const bossMission = useMemo(
+    () =>
+      [...missions]
+        .sort((a: any, b: any) => a.order - b.order)
+        .sort((a: any, b: any) => (a.type === 'boss' ? 1 : 0) - (b.type === 'boss' ? 1 : 0))
+        .find((m: any) => m.type === 'boss') || null,
+    [missions]
+  );
   const bossHpMax = Number(game?.bossHp) || 1000;
   const bossHits = Array.isArray(session?.bossHits) ? session.bossHits.length : 0;
   const bossHpLeft =
@@ -116,10 +140,57 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
   const bossPos = Number(player?.bossPos) || 0;
   const bossDone = Boolean(player?.bossDone);
 
-  const quizQuestion = quizMissions[posMission]?.questions?.[posQuestion];
-  const inQuizQuestion = !quizDone && !!quizQuestion;
-  const bossQuestion = bossMission?.questions?.[bossPos];
-  const inBossQuestion = quizDone && isBossPhase && bossMission && !bossDone && !!bossQuestion;
+  // ==================== งาน (Task) ที่กำลังทำ ====================
+  // ทุกชนิดคำถามถูกแปลงเป็น "งาน" ชุดเดียวกันก่อน — หน้านี้ไม่ต้องรู้ว่าด่านเป็นแบบไหน
+  // เพิ่มชนิดใหม่ในภายหลัง = แก้แค่ที่นี่ที่เดียว
+  // ผูกกับ "ตัวด่าน" ไม่ใช่ "อาร์เรย์ของด่าน" เพราะ task ต้องคงตัวอ้างเดิม
+  // ไม่งั้น useEffect ด้านล่างจะรันทุก render แล้วล้างคำตอบที่เด็กเพิ่งเลือกทิ้ง
+  const quizMission = quizMissions[posMission] || null;
+  const quizTask: Task | null = useMemo(
+    () => missionToTasks(quizMission)[posQuestion] || null,
+    [quizMission, posQuestion]
+  );
+  const bossTask: Task | null = useMemo(
+    () => missionToTasks(bossMission)[bossPos] || null,
+    [bossMission, bossPos]
+  );
+
+  const inQuizQuestion = !quizDone && !!quizTask;
+  const inBossQuestion = quizDone && isBossPhase && !!bossTask && !bossDone;
+  const task: Task | null = inQuizQuestion ? quizTask : inBossQuestion ? bossTask : null;
+  // ใช้ id ของงานเป็นตัวระบุ "ข้นี้" แทนตัว object — กันกรณี object เปลี่ยนตัวตามธรรมชาติ
+  // แล้ว effect ด้านล่างรันซ้ำจนล้างคำตอบของเด็กทิ้ง
+  const taskId = task?.id || '';
+
+  // ขึ้นงานใหม่ -> ล้างคำตอบที่ค้างไว้ และสุ่มลำดับฝั่งขวาใหม่ (ครั้งเดียวต่อข้อ ไม่กระพริบเวลากด)
+  useEffect(() => {
+    setSelected(null);
+    setTextValue('');
+    setActiveLeft(null);
+    setWrongFlash(null);
+    setLastSubmitted(null);
+    if (!task || task.kind !== 'match') {
+      setBOrder([]);
+      setPicks([]);
+      return;
+    }
+    const n = task.pairs?.length || 0;
+    const order = task.pairs!.map((_, i) => i);
+    for (let i = n - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    setBOrder(order);
+    setPicks(new Array(n).fill(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
+
+  // กดฝั่งขวาแล้วไม่ตรงคู่ -> กะพริบเตือนสั้น ๆ
+  useEffect(() => {
+    if (wrongFlash == null) return;
+    const t = window.setTimeout(() => setWrongFlash(null), 500);
+    return () => window.clearTimeout(t);
+  }, [wrongFlash]);
 
   // "เอกลักษณ์ข้อ" — เปลี่ยนเมื่อขึ้นข้อใหม่ (ใช้รีเซ็ตนาฬิกา)
   // ต้องมี session แล้วเท่านั้น ไม่งั้น reset effect จะยิงตอนที่ข้อมูลยังไม่มา (pos default 0,0)
@@ -258,11 +329,51 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now, inQuizQuestion, inBossQuestion, answer]);
 
+  // ==================== ตัวเลือก/ค่าที่จะส่งของแต่ละชนิดงาน ====================
+  // choice -> index | numeric -> ข้อความที่พิมพ์ | match -> picks (b-index ของแต่ละ a-index)
+  const matchPairs = task?.kind === 'match' ? task.pairs || [] : [];
+  const matchDoneCount = picks.filter((p) => p != null).length;
+  const matchLockedB = picks.filter((p): p is number => p != null);
+
+  const pickLeft = (i: number) => {
+    if (answer) return;
+    // แตะคู่ที่จับแล้ว = ปลดล็อกเพื่อเลือกใหม่
+    if (picks[i] != null) {
+      setPicks((prev) => prev.map((p, k) => (k === i ? null : p)));
+      return;
+    }
+    setActiveLeft((cur) => (cur === i ? null : i));
+  };
+
+  const pickRight = (bIdx: number) => {
+    if (answer || activeLeft == null) return;
+    if (picks.some((p) => p === bIdx)) return; // ถูกจับไปแล้ว
+    if (bIdx !== activeLeft) {
+      setWrongFlash(bIdx);
+      return;
+    }
+    setPicks((prev) => prev.map((p, k) => (k === activeLeft ? bIdx : p)));
+    setActiveLeft(null);
+  };
+
+  /** ค่าที่จะส่ง — null = ยังตอบไม่ครบ/ยังไม่ได้ตอบ */
+  const responseValue = (): any => {
+    if (!task) return null;
+    if (task.kind === 'choice') return selected == null ? null : selected;
+    if (task.kind === 'numeric') return textValue.trim() === '' ? null : textValue.trim();
+    if (task.kind === 'match') {
+      if (matchPairs.length === 0) return null;
+      return picks.every((p) => p != null) ? picks.map((p) => Number(p)) : null;
+    }
+    return null;
+  };
+
   const submit = async () => {
-    if (selected == null || !playerId || !((inQuizQuestion && quizQuestion) || (inBossQuestion && bossQuestion))) return;
     const mission = inQuizQuestion ? quizMissions[posMission] : bossMission;
-    const question = inQuizQuestion ? quizQuestion : bossQuestion;
-    if (!mission || !question) return;
+    if (!playerId || !task || !mission) return;
+    const payload = responseValue();
+    if (payload == null) return;
+    setLastSubmitted(payload);
     setSubmitting(true);
     setError('');
     try {
@@ -273,8 +384,8 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
           playerId,
           gameId,
           missionId: mission.id,
-          questionId: question.id,
-          selectedAnswer: selected,
+          questionId: task.id,
+          selectedAnswer: payload,
           timeTakenSec: elapsedRef.current / 1000,
         }),
       }).then((x) => x.json());
@@ -287,6 +398,7 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
         // ✅ ตอบถูก → ขยับข้อถัดไปทันที (ไม่ต้องรอครู!)
         applyPos(d);
         setSelected(null);
+        setTextValue('');
         setAnswer(null);
         showToast(
           `🎉 ถูกต้อง! +${d.xpGained} XP${d.speedBonus ? ` ⚡เร็ว +${d.speedBonus}` : ''}${
@@ -460,7 +572,9 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
   }
 
   // ข้อที่กำลังแสดง = ข้อควิซ หรือคำถามบอส
-  const showQuestion = inQuizQuestion || inBossQuestion;
+  // เขียนเป็น !!task (ไม่ใช่ inQuizQuestion || inBossQuestion) เพื่อให้ TypeScript
+  // narrow ว่า task ไม่ null ในส่วน render ของงาน
+  const showQuestion = !!task;
 
   return (
     <div className={bg}>
@@ -571,29 +685,110 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
           </div>
         ) : !answer ? (
           <>
-            <p className="text-lg font-medium mb-4">{(inBossQuestion ? bossQuestion : quizQuestion).text}</p>
-            <div className="space-y-2.5 mb-6">
-              {((inBossQuestion ? bossQuestion : quizQuestion).options || []).map((o: string, i: number) => (
-                <button
-                  key={i}
-                  onClick={() => setSelected(i)}
-                  disabled={timeUp}
-                  className={`w-full p-4 rounded-2xl border-2 text-left transition-all disabled:opacity-50 ${
-                    selected === i
-                      ? 'border-quest-sky bg-sky-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <span className="font-medium">{String.fromCharCode(65 + i)}.</span> {o}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={submit}
-              disabled={selected == null || submitting}
-              className="btn-primary w-full disabled:opacity-50"
-            >
-              {submitting ? 'กำลังส่ง...' : 'ตอบ'}
+            <p className="text-lg font-medium mb-4">{task.prompt}</p>
+
+            {/* ---------- ชนิด: ตัวเลือก (แบบเดิม) ---------- */}
+            {task.kind === 'choice' && (
+              <div className="space-y-2.5 mb-6">
+                {task.options.map((o, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSelected(i)}
+                    disabled={timeUp}
+                    className={`w-full p-4 rounded-2xl border-2 text-left transition-all disabled:opacity-50 ${
+                      selected === i ? 'border-quest-sky bg-sky-50' : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <span className="font-medium">{String.fromCharCode(65 + i)}.</span> {o}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* ---------- ชนิด: กรอกตัวเลข ---------- */}
+            {task.kind === 'numeric' && (
+              <div className="mb-6">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoFocus
+                    value={textValue}
+                    disabled={timeUp}
+                    onChange={(e) => setTextValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && responseValue() != null) submit();
+                    }}
+                    placeholder="พิมพ์คำตอบ"
+                    className="flex-1 px-4 py-4 rounded-2xl border-2 border-gray-200 text-2xl font-bold text-center tabular-nums focus:border-quest-sky focus:outline-none disabled:opacity-50"
+                  />
+                  {task.unit && (
+                    <span className="text-lg font-medium text-quest-text/60 shrink-0">{task.unit}</span>
+                  )}
+                </div>
+                <p className="text-xs text-quest-text/50 mt-2 text-center">พิมพ์เฉพาะตัวเลขก็ได้</p>
+              </div>
+            )}
+
+            {/* ---------- ชนิด: จับคู่ (แตะทีละคู่ ไม่ต้องลาก) ---------- */}
+            {task.kind === 'match' && (
+              <div className="mb-6">
+                <p className="text-xs text-quest-text/60 text-center mb-3">
+                  {activeLeft == null
+                    ? '👆 แตะกล่องซ้ายที่ต้องการก่อน'
+                    : '👆 ตอนนี้แตะคำตอบทางขวาที่ตรงกัน'}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {matchPairs.map((p, i) => {
+                    const got = picks[i];
+                    const ok = got != null && got === i;
+                    return (
+                      <button
+                        key={`a${i}`}
+                        onClick={() => pickLeft(i)}
+                        disabled={timeUp}
+                        className={`p-3 rounded-2xl border-2 text-sm font-medium transition-all disabled:opacity-50 min-h-[3.25rem] ${
+                          ok
+                            ? 'border-green-400 bg-green-50 text-green-700'
+                            : activeLeft === i
+                              ? 'border-quest-sky bg-sky-50'
+                              : got != null
+                                ? 'border-red-300 bg-red-50 text-red-600'
+                                : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        {p.a}
+                      </button>
+                    );
+                  })}
+                  {bOrder.map((bIdx) => {
+                    const locked = matchLockedB.includes(bIdx);
+                    return (
+                      <button
+                        key={`b${bIdx}`}
+                        onClick={() => pickRight(bIdx)}
+                        disabled={timeUp || locked || activeLeft == null}
+                        className={`p-3 rounded-2xl border-2 text-sm transition-all min-h-[3.25rem] disabled:opacity-40 ${
+                          locked
+                            ? 'border-green-400 bg-green-50 text-green-700 font-medium'
+                            : wrongFlash === bIdx
+                              ? 'border-red-400 bg-red-100 animate-pulse'
+                              : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        {matchPairs[bIdx]?.b}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-quest-text/50 mt-2 text-center">
+                  จับแล้ว {matchDoneCount}/{matchPairs.length} คู่ · แตะคู่ที่จับแล้วเพื่อเปลี่ยน
+                </p>
+              </div>
+            )}
+
+            <button onClick={submit} disabled={responseValue() == null || submitting} className="btn-primary w-full disabled:opacity-50">
+              {submitting ? 'กำลังส่ง...' : task.kind === 'match' ? 'ตรวจคำตอบ' : 'ตอบ'}
             </button>
           </>
         ) : (
@@ -601,13 +796,36 @@ export default function StudentGamePage({ params }: { params: { id: string } }) 
             <div className="text-6xl">💪</div>
             <h3 className="text-xl font-bold text-orange-500">ยังไม่ถูกนะ</h3>
 
+            {task.kind === 'match' && (
+              <div className="p-4 bg-red-50 rounded-2xl text-left">
+                <p className="text-xs font-medium text-red-600 mb-1.5">🔗 คู่ที่จับผิด</p>
+                {matchPairs.map((p, i) => {
+                  const got = picks[i];
+                  if (got != null && got === i) return null;
+                  return (
+                    <p key={i} className="text-sm text-red-700 mb-0.5">
+                      <span className="font-medium">{p.a}</span> →{' '}
+                      {got != null ? matchPairs[got]?.b : <span className="text-red-400">ยังไม่ได้จับ</span>}
+                      <span className="text-red-500"> (ถูกต้องคือ {p.b})</span>
+                    </p>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="p-4 bg-green-50 rounded-2xl text-left">
               <p className="text-xs font-medium text-green-700 mb-1">✅ คำตอบที่ถูกคือ</p>
-              <p className="text-sm text-green-800 font-medium">
-                {String.fromCharCode(65 + Number(answer.correctAnswer))}.{' '}
-                {(inBossQuestion ? bossQuestion : quizQuestion)?.options?.[Number(answer.correctAnswer)] || ''}
-              </p>
+              <p className="text-sm text-green-800 font-medium">{correctLabel(task)}</p>
             </div>
+
+            {task.kind !== 'match' && (
+              <p className="text-sm text-quest-text/60">
+                คุณตอบ:{' '}
+                <span className="font-medium text-quest-text">
+                  {answerLabel(task, lastSubmitted)}
+                </span>
+              </p>
+            )}
 
             {answer.explanation && (
               <div className="p-4 bg-orange-50 rounded-2xl text-left">

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { MASCOT, roundLabel } from '@/lib/utils';
+import { questionToTask, answerLabel } from '@/lib/mission-tasks';
 import HomeButton from '@/components/HomeButton';
 
 function Me() {
@@ -118,12 +119,9 @@ function Me() {
     return parts;
   }, [strongRows, weakRows, selected]);
 
-  const optText = (answer: any, idx: number) => {
-    const letter = String.fromCharCode(65 + idx);
-    const q = questionById.get(answer.questionId);
-    const opt = q?.options && q.options[idx];
-    return opt != null && opt !== '' ? `${letter} (${opt})` : `ข้อ ${letter}`;
-  };
+  // ข้อความคำตอบ — รองรับทุกชนิด (ตัวเลือก/กรอกตัวเลข/จับคู่) ผ่านชั้นแกนกลาง
+  const optText = (answer: any, value: any) =>
+    answerLabel(questionToTask(questionById.get(answer.questionId), 0), value);
 
   if (loading) {
     return (

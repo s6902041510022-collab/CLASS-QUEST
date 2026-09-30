@@ -268,9 +268,10 @@ function GameAnalytics({ data, tab, setTab }: any) {
               </div>
               <p className="text-xs text-quest-text/60 mb-2">
                 {q.missionTitle} • ตอบแล้ว {q.answered} ครั้ง • ถูก {q.correct} ครั้ง
+                {q.correctLabel ? <> • เฉลย: {q.correctLabel}</> : null}
               </p>
               <div className="space-y-1.5">
-                {q.optionTally.map((o: any) => {
+                {(q.optionTally || []).map((o: any) => {
                   const pct =
                     q.answered > 0 ? Math.round((o.count / q.answered) * 100) : 0;
                   const isCorrect = o.index === q.correctAnswer;
@@ -295,6 +296,31 @@ function GameAnalytics({ data, tab, setTab }: any) {
                             className={`h-full rounded-full ${
                               isCorrect ? 'bg-green-400' : 'bg-orange-300'
                             }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* ชนิดอื่น (กรอกตัวเลข/จับคู่) — ไม่มีตัวเลือกให้นับ จึงสรุปเป็นคำตอบที่พบบ่อย */}
+                {(q.answerTally || []).map((o: any) => {
+                  const pct = q.answered > 0 ? Math.round((o.count / q.answered) * 100) : 0;
+                  return (
+                    <div key={o.label} className="flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 bg-gray-100 text-quest-text/50">
+                        •
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between text-xs mb-0.5">
+                          <span className="truncate">{o.label}</span>
+                          <span className="text-quest-text/60 shrink-0 ml-2">
+                            {o.count} คน ({pct}%)
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-orange-300"
                             style={{ width: `${pct}%` }}
                           />
                         </div>

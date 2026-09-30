@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "test": "node --test",
+    "seed": "node data/seed-all.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.0",
