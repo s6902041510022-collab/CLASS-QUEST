@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'fs';
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { existsSync, readFileSync, constants } from 'fs';
+import { access, mkdir, readFile, writeFile } from 'fs/promises';
 import { dirname } from 'path';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -148,12 +148,36 @@ type Backend = {
   locked<T>(fn: () => Promise<T>): Promise<T>;
 };
 
+/**
+ * แปลงข้อผิดพลาดจากการเขียนไฟล์ ให้บอกได้ว่าต้องทำอะไรต่อ
+ *
+ * เคยเจอกรณีนี้จริง: deploy บน Vercel แล้วล็อกอินไม่ได้ เพราะไม่ได้ตั้ง
+ * KV_REST_API_URL / KV_REST_API_TOKEN ระบบจึงตกไปใช้ที่เก็บแบบไฟล์
+ * แต่ /var/task ของ Vercel เป็น read-only ทำให้ทุกคำสั่งที่แตะฐานข้อมูลได้ 500
+ * ข้อความดิบคือ EROFS ซึ่งไม่บอกว่าต้องไปตั้ง env อะไร
+ */
+function explainWriteFail(err: any): Error {
+  const code = err?.code;
+  if (code === 'EROFS' || code === 'EACCES' || code === 'EPERM' || code === 'ENOSPC') {
+    return new Error(
+      `เขียน ${DB_PATH} ไม่ได้ (${code}) — ตอนนี้ใช้ฐานข้อมูลแบบไฟล์ ซึ่งใช้ได้เฉพาะเครื่องที่เขียนไฟล์ได้ ` +
+        `(เช่น เครื่องครูที่รัน npm run dev) ถ้า deploy บน Vercel หรือระบบที่ filesystem เป็น read-only ` +
+        `ต้องตั้ง KV_REST_API_URL และ KV_REST_API_TOKEN (Vercel KV / Upstash Redis) ให้ระบบใช้ Redis แทน`
+    );
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
 const fileBackend: Backend = {
   label: `ไฟล์ ${DB_PATH}`,
   async load() {
     if (!existsSync(DB_PATH)) {
-      await mkdir(dirname(DB_PATH), { recursive: true });
-      await writeFile(DB_PATH, JSON.stringify(seedData(), null, 2), 'utf8');
+      try {
+        await mkdir(dirname(DB_PATH), { recursive: true });
+        await writeFile(DB_PATH, JSON.stringify(seedData(), null, 2), 'utf8');
+      } catch (err) {
+        throw explainWriteFail(err);
+      }
     }
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
@@ -165,7 +189,11 @@ const fileBackend: Backend = {
     return seedData();
   },
   async save(data) {
-    await writeFile(DB_PATH, JSON.stringify(data, null, 2), 'utf8');
+    try {
+      await writeFile(DB_PATH, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+      throw explainWriteFail(err);
+    }
   },
   // โปรแกรมเดียวบนเครื่องครู คิวในเครื่องก็พอ (getDb().write() จะเข้าคิวนี้อยู่แล้ว)
   locked: async (fn) => fn(),
@@ -185,6 +213,24 @@ const kvBackend: Backend = {
 
 const backend: Backend = usingKv ? kvBackend : fileBackend;
 export const storeLabel = backend.label;
+
+/**
+ * เช็คว่าที่เก็บข้อมูล "เขียนได้" หรือไม่
+ *
+ * เช็คสิทธิ์อย่างเดียว ไม่เขียนอะไรลงดิสก์จริง
+ * ต้องการเพราะเคยเจอกรณีนี้: deploy บน Vercel แล้วทุกอย่างพัง แต่หน้าเว็บยังเปิดได้
+ * เพราะหน้าเว็บไม่ได้แตะฐานข้อมูลจนกว่าจะกดล็อกอิน — ถ้ามีค่านี้บอกได้ทันที
+ * ว่าเขียนไม่ได้ แทนที่จะต้องไปเดาทีละอย่าง
+ */
+export async function storeWritable(): Promise<{ writable: boolean; reason?: string }> {
+  if (usingKv) return { writable: true }; // Redis ไม่ต้องใช้ดิสก์
+  try {
+    await access(dirname(DB_PATH), constants.W_OK);
+    return { writable: true };
+  } catch (err: any) {
+    return { writable: false, reason: err?.code || String(err?.message || err) };
+  }
+}
 
 let cache: { data: DBData; at: number } | null = null;
 
