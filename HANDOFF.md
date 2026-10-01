@@ -541,6 +541,11 @@ npm.cmd run check   # tsc --noEmit + next build
 - **ห้ามส่ง `correctAnswer` / `ownerId` ไปหานักเรียน**
   ใช้ `publicMissions()` / `publicGame()` / `publicStudent()` ที่ตัดออกให้แล้ว
   เฉลยตอนตอบมาจาก `POST /api/answers`
+- **`loading` ที่เริ่มเป็น `true` ห้าม `return` ออกจาก effect ก่อน `setLoading(false)`**
+  เจอแล้วที่ `student/me/page.tsx` — `if (!studentId) return;` ทำให้หน้าโหลดค้างถาวร
+  และ fallback "ไม่พบข้อมูลของคุณ" ที่เขียนไว้ด้านล่างไปไม่ถึง
+  **เทสต์ระดับ API จะจับไม่ได้** เพราะพังเฉพาะตอน render ในเบราว์เซอร์
+  → ต้องไล่เช็คเอง: `useState(true)` แล้วดูว่าทุกทางออกของ effect เรียก `setLoading(false)` ไหม
 - **`ownerId` รั่วได้เฉพาะตอนยิงเซิร์ฟเวอร์จริง — ตอนเทสต์บนเครื่องมักไม่เห็น**
   `newStudent()` เขียน `ownerId` + `completedSessions` ลงทุก record ที่สร้างผ่าน API
   แต่นักเรียน 4 คนใน `db.default.json` ไม่มี field นี้

@@ -22,7 +22,14 @@ function Me() {
   const [selected, setSelected] = useState<any>(null);
 
   useEffect(() => {
-    if (!studentId) return;
+    // ⚠️ ต้อง setLoading(false) ตรงนี้ด้วย
+    //    เคยเป็น `if (!studentId) return;` เฉย ๆ → loading ค้าง true ตลอด
+    //    คนที่เปิด /student/me ตรง ๆ (ไม่มี ?studentId=) เจอหน้า "กำลังโหลด..." ค้างถาวร
+    //    และไปไม่ถึง fallback "ไม่พบข้อมูลของคุณ" ที่เขียนไว้ด้านล่าง
+    if (!studentId) {
+      setLoading(false);
+      return;
+    }
     (async () => {
       try {
         const r = await fetch(`/api/students/${studentId}`);
