@@ -67,16 +67,6 @@ export default function HelpGuide() {
     if (new URLSearchParams(window.location.search).get('help') === '1') setOpen(true);
   }, []);
 
-  // ปิดด้วย Escape
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
-
   // เลื่อนหน้าหลังไม่ได้ตอนเปิด modal + ย้ายโฟกัสเข้าปุ่มปิด
   useEffect(() => {
     if (!open) return;
@@ -97,6 +87,20 @@ export default function HelpGuide() {
     else url.searchParams.delete('help');
     window.history.replaceState({}, '', url);
   };
+
+  // ⚠️ ปิดทุกทางต้องผ่าน show(false) เสมอ ไม่ใช่ setOpen(false) ตรง ๆ
+  //    เพราะ show() คือตัวเดียวที่ลบ ?help=1 ออกจาก URL
+  //    ถ้าทางไหนเรียก setOpen(false) โดยตรง ลิงก์คู่มือจะค้างอยู่ใน URL
+  //    แล้วรีเฟรชแล้ว modal จะเปิดขึ้นมาอีก (เจอตอนทดสอบบนเว็บจริง)
+  //    → ทุกจุดที่ปิด modal ต้องใช้ show(false)
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') show(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
 
   return (
     <>
