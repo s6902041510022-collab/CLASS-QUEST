@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { MASCOT } from '@/lib/utils';
+import HelpGuide from '@/components/HelpGuide';
 
 export default function HomePage() {
   return (
@@ -39,6 +40,11 @@ export default function HomePage() {
               <Link href="/student/join" className="btn-secondary text-lg">
                 🎮 สำหรับนักเรียน
               </Link>
+            </div>
+
+            {/* คู่มือใช้งาน — คนที่ไม่รู้จะเริ่มจากไหน เปิดอ่านได้ตรงนี้ */}
+            <div className="mt-6 flex justify-center">
+              <HelpGuide />
             </div>
           </div>
         </div>
